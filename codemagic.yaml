@@ -7,20 +7,17 @@ workflows:
       ios_signing:
         distribution_type: app_store
         bundle_id: com.example.flutterprojects
-      variables:
-        XCODE_WORKSPACE: ios/Runner.xcworkspace
-        XCODE_SCHEME: Runner
-        BUNDLE_ID: com.example.flutterprojects
       xcode: latest
       ruby: 2.7.5
     triggering:
       events:
         - push
         - pull_request
-      branch:
-        include_patterns:
-          - develop
-          - main
+      branch_patterns:
+        - pattern: develop
+          include: true
+        - pattern: main
+          include: true
     scripts:
       - name: Install Flutter dependencies
         script: |
@@ -49,10 +46,11 @@ workflows:
       events:
         - push
         - pull_request
-      branch:
-        include_patterns:
-          - develop
-          - main
+      branch_patterns:
+        - pattern: develop
+          include: true
+        - pattern: main
+          include: true
     scripts:
       - name: Install Flutter dependencies
         script: |
