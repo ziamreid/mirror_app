@@ -1,0 +1,81 @@
+# Implementation Plan - Liquid Ether Fluid Simulation
+
+Build a production-grade, ultra-high-quality fluid simulation background for a Flutter mobile app using custom GLSL shaders and multi-touch integration.
+
+## User Review Required
+
+> [!IMPORTANT]
+> - **Shader Compilation**: Requires Flutter 3.7+. The shaders will be registered in `pubspec.yaml` and compiled by Flutter's asset packager using the Impeller/Skia compiler.
+> - **Uniform Layout Order**: The sequence of calling `FragmentShader.setFloat` in Dart must match the exact declaration order in `fluid.frag`.
+> - **Compatibility**: Tested on Android (Skia/Vulkan) and iOS (Impeller/Metal).
+
+## Proposed Changes
+
+We will create the following files to implement the simulation:
+
+---
+
+### Shaders Component
+
+#### [NEW] [fluid_utils.glsl](file:///d:/flutter_projects/lib/shaders/fluid_utils.glsl)
+Contains noise, hash, and Fractional Brownian Motion (fBm) helper functions:
+- 2D Value/Gradient noise.
+- 8-octave fBm with rotational matrices per octave to avoid axis-aligned artifacts.
+- Dual-compilation guard for when compiled standalone.
+
+#### [NEW] [fluid.frag](file:///d:/flutter_projects/lib/shaders/fluid.frag)
+The main GLSL fragment shader:
+- Defines the 3-level domain warping equations.
+- Handles up to 5 multi-touch coordinates and calculates pressure disturbances.
+- Defines the custom Deep Space purple/indigo color palette.
+- Combines 3 luminous glow passes.
+- Applies vignette, chromatic aberration, film grain, and gamma correction post-processing.
+
+---
+
+### Dart Flutter Widgets Component
+
+#### [NEW] [touch_point.dart](file:///d:/flutter_projects/lib/widgets/touch_point.dart)
+The data model for tracking a pointer's position, strength, and velocity. Implements frame-rate-independent decay.
+
+#### [NEW] [liquid_ether_painter.dart](file:///d:/flutter_projects/lib/widgets/liquid_ether_painter.dart)
+Implements `CustomPainter` to bind Flutter values to the compiled `FragmentShader` uniforms:
+- Feeds `uTime`, `uResolution`, `uTouches`, `uTouchStrengths`, `uTouchCount`, `uFlowSpeed`, `uTurbulence`, and `uGlowIntensity`.
+- Ensures zero allocations inside the `paint` call (reusing Paint, Rect, and cached float lists).
+
+#### [NEW] [liquid_ether.dart](file:///d:/flutter_projects/lib/widgets/liquid_ether.dart)
+The main stateful widget holding the simulation state:
+- Manages the shader lifecycle (loading the shader from assets).
+- Listens to raw pointer events using `Listener` for raw multi-touch support.
+- Runs a Ticker loop tracking real delta-time to decay touches and drive the time uniform.
+- Optimizes widget updates using `RepaintBoundary`.
+
+---
+
+### Demo Screen and Main Application
+
+#### [NEW] [liquid_ether_demo.dart](file:///d:/flutter_projects/lib/screens/liquid_ether_demo.dart)
+The full showcase screen featuring:
+- Edge-to-edge full-screen fluid simulation.
+- Centered glassmorphic card (BackdropFilter blur).
+- Control panel to tweak flow speed, turbulence, and glow intensity in real time.
+- Fading instructions and an FPS counter badge.
+
+#### [MODIFY] [pubspec.yaml](file:///d:/flutter_projects/pubspec.yaml)
+- Register `lib/shaders/fluid.frag` and `lib/shaders/fluid_utils.glsl` under the `flutter.shaders` configuration.
+
+#### [MODIFY] [main.dart](file:///d:/flutter_projects/lib/main.dart)
+- Replace the default counter application with the `LiquidEtherDemo` screen.
+- Fix syntax errors in the original code.
+
+## Verification Plan
+
+### Automated/Tool Verification
+- Run `flutter pub get` and verify that shader files compile successfully.
+- Check for Dart compiler/analyzer warnings or errors using standard Flutter lint checks.
+
+### Manual Verification
+- Run the Flutter app in the web browser (or emulator/physical device if needed) using `flutter run`.
+- Drag fingers or cursor to check for fluid trails and swirls reacting in real-time.
+- Check responsiveness when scaling parameters via sliders.
+- Verify FPS remains close to 60fps.
