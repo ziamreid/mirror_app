@@ -1,0 +1,71 @@
+workflows:
+  ios-workflow:
+    name: iOS Workflow
+    instance_type: mac_mini_m1
+    max_build_duration: 120
+    environment:
+      ios_signing:
+        distribution_type: app_store
+        bundle_id: com.example.flutterprojects
+      variables:
+        XCODE_WORKSPACE: ios/Runner.xcworkspace
+        XCODE_SCHEME: Runner
+        BUNDLE_ID: com.example.flutterprojects
+      xcode: latest
+      ruby: 2.7.5
+    triggering:
+      events:
+        - push
+        - pull_request
+      branch:
+        include_patterns:
+          - develop
+          - main
+    scripts:
+      - name: Install Flutter dependencies
+        script: |
+          flutter pub get
+      - name: Build iOS app
+        script: |
+          flutter build ios --release --no-codesign
+    artifacts:
+      - build/ios/iphoneos/*.app
+      - build/ios/iphoneos/*.app/Frameworks
+    publishing:
+      email:
+        recipients:
+          - $PERSONAL_EMAIL
+        notify:
+          success: true
+          failure: true
+
+  web-workflow:
+    name: Web Workflow
+    instance_type: linux
+    max_build_duration: 60
+    environment:
+      flutter: stable
+    triggering:
+      events:
+        - push
+        - pull_request
+      branch:
+        include_patterns:
+          - develop
+          - main
+    scripts:
+      - name: Install Flutter dependencies
+        script: |
+          flutter pub get
+      - name: Build web app
+        script: |
+          flutter build web --release
+    artifacts:
+      - build/web/**
+    publishing:
+      email:
+        recipients:
+          - $PERSONAL_EMAIL
+        notify:
+          success: true
+          failure: true
