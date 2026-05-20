@@ -21,7 +21,7 @@ workflows:
           flutter pub get
       - name: Build iOS app
         script: |
-          flutter build ios --simulator --release
+          flutter build ios --simulator
     artifacts:
       - build/ios/iphonesimulator/*.app
       - build/ios/iphonesimulator/*.app/Frameworks
