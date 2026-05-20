@@ -21,10 +21,10 @@ workflows:
           flutter pub get
       - name: Build iOS app
         script: |
-          flutter build ios --release --no-codesign
+          flutter build ios --simulator --release
     artifacts:
-      - build/ios/iphoneos/*.app
-      - build/ios/iphoneos/*.app/Frameworks
+      - build/ios/iphonesimulator/*.app
+      - build/ios/iphonesimulator/*.app/Frameworks
 
   web-workflow:
     name: Web Workflow
