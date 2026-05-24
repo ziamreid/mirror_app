@@ -5,7 +5,7 @@ workflows:
     max_build_duration: 120
     environment:
       xcode: latest
-      ruby: 2.7.5
+      ruby: 3.4.8
     scripts:
       - name: Install CocoaPods
         script: |
