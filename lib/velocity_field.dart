@@ -5,10 +5,23 @@ class VelocityField {
   static const int kSize  = 32;
   static const int kCells = kSize * kSize;
 
-  final Float32List velX   = Float32List(kCells);
-  final Float32List velY   = Float32List(kCells);
-  final Float32List _nextX = Float32List(kCells);
-  final Float32List _nextY = Float32List(kCells);
+  final Float32List velX;
+  final Float32List velY;
+  final Float32List _nextX;
+  final Float32List _nextY;
+
+  VelocityField()
+      : velX  = Float32List(kCells),
+        velY  = Float32List(kCells),
+        _nextX = Float32List(kCells),
+        _nextY = Float32List(kCells);
+
+  // Used by isolate — constructs from copied arrays
+  VelocityField.fromArrays(Float32List x, Float32List y)
+      : velX  = Float32List.fromList(x),
+        velY  = Float32List.fromList(y),
+        _nextX = Float32List(kCells),
+        _nextY = Float32List(kCells);
 
   void addForce(
     double normX,
@@ -48,7 +61,6 @@ class VelocityField {
     _decay(dt);
   }
 
-  // 4.3 — writes into caller-supplied buffer, zero allocation
   void toPixelsInto(Uint8List out) {
     for (int i = 0; i < kCells; i++) {
       final vx = velX[i].clamp(-1.0, 1.0);
@@ -60,7 +72,6 @@ class VelocityField {
     }
   }
 
-  // Kept for compatibility
   Uint8List toPixels() {
     final buf = Uint8List(kCells * 4);
     toPixelsInto(buf);
