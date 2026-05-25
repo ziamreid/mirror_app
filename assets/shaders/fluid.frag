@@ -6,7 +6,6 @@ uniform vec2 u_touch;
 uniform float u_touchForce;
 uniform vec2 u_velocity;
 uniform float u_breath;
-uniform float u_pulse;
 
 out vec4 fragColor;
 
@@ -44,27 +43,21 @@ void main() {
   vec2 uv = fragCoord / u_resolution;
   float t = u_time * 0.3;
 
-  // --- TOUCH DISPLACEMENT ---
-  vec2 toTouch = uv - u_touch;
-  float dist = length(toTouch);
-  float touchDisplace = u_touchForce * 0.10 / (dist * dist + 0.015);
-  touchDisplace = clamp(touchDisplace, 0.0, 0.08);
-  vec2 displaced = uv + normalize(toTouch + vec2(0.001)) * touchDisplace;
-  displaced += u_velocity * 0.03 * u_touchForce;
-
-  // --- LAUNCH PULSE ---
-  vec2 center = vec2(0.5, 0.5);
-  float pulseRing = length(uv - center);
-  float pulseMask = smoothstep(0.04, 0.0,
-    abs(pulseRing - u_pulse * 0.9)) * (1.0 - u_pulse);
-  displaced += normalize(uv - center + vec2(0.001)) * pulseMask * 0.06;
+  // --- TOUCH DISTURBANCE ---
+  float aspect = u_resolution.x / u_resolution.y;
+  vec2 uvA = vec2(uv.x * aspect, uv.y);
+  vec2 tA  = vec2(u_touch.x * aspect, u_touch.y);
+  float d  = length(uvA - tA);
+  float force = u_touchForce * exp(-d * d * 5.0);
+  vec2 pushDir = normalize(uv - u_touch + vec2(0.0001));
+  vec2 warpBase = uv + pushDir * force * 0.3 + u_velocity * force * 0.15;
 
   // --- FBM DOMAIN WARP ---
-  vec2 q = vec2(fbm(displaced + t),
-                fbm(displaced + vec2(1.7, 9.2) + t * 0.8));
-  vec2 r = vec2(fbm(displaced + 2.0 * q + vec2(1.7, 9.2) + t * 0.3),
-                fbm(displaced + 2.0 * q + vec2(8.3, 2.8) + t * 0.5));
-  float f = fbm(displaced + 2.5 * r + t * 0.2);
+  vec2 q = vec2(fbm(warpBase + t),
+                fbm(warpBase + vec2(1.7, 9.2) + t * 0.8));
+  vec2 r = vec2(fbm(warpBase + 2.0 * q + vec2(1.7, 9.2) + t * 0.3),
+                fbm(warpBase + 2.0 * q + vec2(8.3, 2.8) + t * 0.5));
+  float f = fbm(warpBase + 2.5 * r + t * 0.2);
 
   f = 0.5 + 0.5 * f;
   f = pow(f, 1.8);

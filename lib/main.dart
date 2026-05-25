@@ -28,18 +28,16 @@ class _FluidScreenState extends State<FluidScreen>
     with SingleTickerProviderStateMixin {
   ui.FragmentShader? _shader;
   late Ticker _ticker;
+  bool _loaded = false;
 
   double _time = 0.0;
   double _breath = 0.5;
-  double _pulse = 0.0;
-  bool _pulseDone = false;
-  bool _loaded = false;
-
-  // Touch
   Offset _touch = const Offset(0.5, 0.5);
   double _touchForce = 0.0;
   Offset _velocity = Offset.zero;
-  Offset _lastTouch = Offset.zero;
+  Size _size = Size.zero;
+
+  final _repaint = ValueNotifier<int>(0);
 
   @override
   void initState() {
@@ -53,89 +51,59 @@ class _FluidScreenState extends State<FluidScreen>
     final program = await ui.FragmentProgram.fromAsset(
       'assets/shaders/fluid.frag',
     );
-    setState(() {
-      _shader = program.fragmentShader();
-      _loaded = true;
-    });
+    _shader = program.fragmentShader();
+    setState(() => _loaded = true);
   }
 
   void _onTick(Duration elapsed) {
     if (!_loaded) return;
     final t = elapsed.inMilliseconds / 1000.0;
-    final dt = t - _time;
+    final dt = (t - _time).clamp(0.0, 0.05);
+    _time = t;
 
-    // Breathing — 8 second cycle
     final breathCycle = (t % 8.0) / 8.0;
-    final breath = (sin(breathCycle * 2 * pi - pi / 2) + 1.0) / 2.0;
+    _breath = (sin(breathCycle * 2 * pi - pi / 2) + 1.0) / 2.0;
 
-    // Launch pulse — plays once over 2 seconds
-    double pulse = _pulse;
-    if (!_pulseDone) {
-      pulse = (t / 2.0).clamp(0.0, 1.0);
-      if (pulse >= 1.0) _pulseDone = true;
-    }
+    _touchForce = (_touchForce - dt * 1.5).clamp(0.0, 1.0);
+    _velocity = _velocity * 0.88;
 
-    // Touch force decay
-    double touchForce = (_touchForce - dt * 1.2).clamp(0.0, 1.0);
-
-    // Velocity damping
-    Offset velocity = _velocity * 0.85;
-
-    setState(() {
-      _time = t;
-      _breath = breath;
-      _pulse = pulse;
-      _touchForce = touchForce;
-      _velocity = velocity;
-    });
+    _repaint.value++;
   }
 
-  void _onPanUpdate(DragUpdateDetails details, Size size) {
-    final pos = Offset(
-      details.localPosition.dx / size.width,
-      details.localPosition.dy / size.height,
+  void _onPanUpdate(DragUpdateDetails details) {
+    if (_size == Size.zero) return;
+    _touch = Offset(
+      details.localPosition.dx / _size.width,
+      details.localPosition.dy / _size.height,
     );
-    final vel = Offset(
-      details.delta.dx / size.width,
-      details.delta.dy / size.height,
+    _velocity = Offset(
+      details.delta.dx / _size.width,
+      details.delta.dy / _size.height,
     );
-    setState(() {
-      _touch = pos;
-      _touchForce = 1.0;
-      _velocity = vel;
-      _lastTouch = pos;
-    });
-  }
-
-  void _onPanEnd(DragEndDetails details) {
-    // touchForce decays naturally in tick
+    _touchForce = 1.0;
   }
 
   @override
   void dispose() {
     _ticker.dispose();
+    _repaint.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final size = MediaQuery.of(context).size;
+    _size = MediaQuery.of(context).size;
     return Scaffold(
       backgroundColor: Colors.black,
       body: GestureDetector(
-        onPanUpdate: (d) => _onPanUpdate(d, size),
-        onPanEnd: _onPanEnd,
+        onPanUpdate: _onPanUpdate,
         child: _loaded && _shader != null
             ? RepaintBoundary(
                 child: CustomPaint(
                   painter: FluidPainter(
                     shader: _shader!,
-                    time: _time,
-                    touch: _touch,
-                    touchForce: _touchForce,
-                    velocity: _velocity,
-                    breath: _breath,
-                    pulse: _pulse,
+                    state: this,
+                    repaint: _repaint,
                   ),
                   size: Size.infinite,
                 ),
@@ -148,35 +116,25 @@ class _FluidScreenState extends State<FluidScreen>
 
 class FluidPainter extends CustomPainter {
   final ui.FragmentShader shader;
-  final double time;
-  final Offset touch;
-  final double touchForce;
-  final Offset velocity;
-  final double breath;
-  final double pulse;
+  final _FluidScreenState state;
 
   FluidPainter({
     required this.shader,
-    required this.time,
-    required this.touch,
-    required this.touchForce,
-    required this.velocity,
-    required this.breath,
-    required this.pulse,
-  });
+    required this.state,
+    required Listenable repaint,
+  }) : super(repaint: repaint);
 
   @override
   void paint(Canvas canvas, Size size) {
-    shader.setFloat(0, time);
+    shader.setFloat(0, state._time);
     shader.setFloat(1, size.width);
     shader.setFloat(2, size.height);
-    shader.setFloat(3, touch.dx);
-    shader.setFloat(4, touch.dy);
-    shader.setFloat(5, touchForce);
-    shader.setFloat(6, velocity.dx);
-    shader.setFloat(7, velocity.dy);
-    shader.setFloat(8, breath);
-    shader.setFloat(9, pulse);
+    shader.setFloat(3, state._touch.dx);
+    shader.setFloat(4, state._touch.dy);
+    shader.setFloat(5, state._touchForce);
+    shader.setFloat(6, state._velocity.dx);
+    shader.setFloat(7, state._velocity.dy);
+    shader.setFloat(8, state._breath);
 
     canvas.drawRect(
       Rect.fromLTWH(0, 0, size.width, size.height),
@@ -185,5 +143,5 @@ class FluidPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(FluidPainter old) => true;
+  bool shouldRepaint(FluidPainter old) => false;
 }
