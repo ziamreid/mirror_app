@@ -9,7 +9,6 @@ class VelocityField {
   final Float32List velY   = Float32List(kCells);
   final Float32List _nextX = Float32List(kCells);
   final Float32List _nextY = Float32List(kCells);
-  final Uint8List   _pixels = Uint8List(kCells * 4);
 
   void addForce(
     double normX,
@@ -49,16 +48,23 @@ class VelocityField {
     _decay(dt);
   }
 
-  Uint8List toPixels() {
+  // 4.3 — writes into caller-supplied buffer, zero allocation
+  void toPixelsInto(Uint8List out) {
     for (int i = 0; i < kCells; i++) {
       final vx = velX[i].clamp(-1.0, 1.0);
       final vy = velY[i].clamp(-1.0, 1.0);
-      _pixels[i * 4 + 0] = (vx * 127.5 + 127.5).round();
-      _pixels[i * 4 + 1] = (vy * 127.5 + 127.5).round();
-      _pixels[i * 4 + 2] = 0;
-      _pixels[i * 4 + 3] = 255;
+      out[i * 4 + 0] = (vx * 127.5 + 127.5).round();
+      out[i * 4 + 1] = (vy * 127.5 + 127.5).round();
+      out[i * 4 + 2] = 0;
+      out[i * 4 + 3] = 255;
     }
-    return _pixels;
+  }
+
+  // Kept for compatibility
+  Uint8List toPixels() {
+    final buf = Uint8List(kCells * 4);
+    toPixelsInto(buf);
+    return buf;
   }
 
   void _diffuse(double dt) {
