@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'velocity_field.dart';
@@ -10,6 +11,43 @@ void main() {
   runApp(const MyApp());
 }
 
+// ─── Isolate function ─────────────────────────────────────────────────────────
+// Receives: [Float32List velX, Float32List velY, double dt]
+// Returns:  Float32List packed as:
+//   [0    .. 1023] = updated velX
+//   [1024 .. 2047] = updated velY
+//   [2048 .. 3071] = pixel R values as floats (0..255)
+//   [3072 .. 4095] = pixel G values as floats (0..255)
+// We avoid Uint8List crossing isolate boundary by using Float32List throughout.
+Float32List _physicsStep(List<dynamic> args) {
+  final Float32List velX = args[0] as Float32List;
+  final Float32List velY = args[1] as Float32List;
+  final double      dt   = args[2] as double;
+
+  final field = VelocityField.fromArrays(velX, velY);
+  field.step(dt);
+
+  const int n = VelocityField.kCells; // 1024
+  final out   = Float32List(n * 4);
+
+  // Pack velX and velY
+  for (int i = 0; i < n; i++) {
+    out[i]         = field.velX[i];
+    out[n + i]     = field.velY[i];
+  }
+
+  // Pack encoded pixel channels (R=velX encoded, G=velY encoded)
+  for (int i = 0; i < n; i++) {
+    final vx = field.velX[i].clamp(-1.0, 1.0);
+    final vy = field.velY[i].clamp(-1.0, 1.0);
+    out[n * 2 + i] = (vx * 127.5 + 127.5).roundToDouble();
+    out[n * 3 + i] = (vy * 127.5 + 127.5).roundToDouble();
+  }
+
+  return out;
+}
+
+// ─── App ──────────────────────────────────────────────────────────────────────
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
   @override
@@ -31,7 +69,7 @@ class _FluidScreenState extends State<FluidScreen>
     with SingleTickerProviderStateMixin {
   ui.FragmentShader? _shader;
   late Ticker         _ticker;
-  bool                _loaded = false;
+  bool                _loaded  = false;
   String?             _errorMessage;
 
   double _time       = 0.0;
@@ -42,14 +80,13 @@ class _FluidScreenState extends State<FluidScreen>
   final Offset _gyro = Offset.zero;
   Size   _size       = Size.zero;
 
-  final _velocityField = VelocityField();
+  final _velocityField  = VelocityField();
   ui.Image? _velocityTexture;
 
-  // 4.3 — frame counter for texture throttle (60hz data, 120fps render)
-  int  _frameCount      = 0;
-  bool _textureBuilding = false;
+  // True while isolate is running — prevents stacking physics calls
+  bool _physicsRunning = false;
 
-  // 4.3 — pre-allocated pixel buffer, zero allocation per frame
+  // Pre-allocated RGBA pixel buffer for decodeImageFromPixels
   final Uint8List _pixelBuffer =
       Uint8List(VelocityField.kSize * VelocityField.kSize * 4);
 
@@ -69,7 +106,7 @@ class _FluidScreenState extends State<FluidScreen>
         'assets/shaders/fluid.frag',
       );
       _shader = program.fragmentShader();
-      // Must await first texture — guarantees sampler is bound before paint()
+      // Build first texture synchronously — guarantees sampler bound before paint
       await _buildTextureOnce();
       if (mounted) setState(() => _loaded = true);
     } catch (e) {
@@ -77,7 +114,7 @@ class _FluidScreenState extends State<FluidScreen>
     }
   }
 
-  // Used once at startup — awaitable so we never paint without a texture
+  // Startup only — awaitable so we never paint without a texture
   Future<void> _buildTextureOnce() async {
     _velocityField.toPixelsInto(_pixelBuffer);
     final completer = Completer<ui.Image>();
@@ -91,25 +128,6 @@ class _FluidScreenState extends State<FluidScreen>
     _velocityTexture = await completer.future;
   }
 
-  // Used every tick — fire-and-forget, single callback, no chained awaits
-  void _buildTexture() {
-    if (_textureBuilding) return;
-    _textureBuilding = true;
-    _velocityField.toPixelsInto(_pixelBuffer);
-    ui.decodeImageFromPixels(
-      _pixelBuffer,
-      VelocityField.kSize,
-      VelocityField.kSize,
-      ui.PixelFormat.rgba8888,
-      (ui.Image img) {
-        final old = _velocityTexture;
-        _velocityTexture = img;
-        old?.dispose();
-        _textureBuilding = false;
-      },
-    );
-  }
-
   void _onTick(Duration elapsed) {
     if (!_loaded) return;
 
@@ -117,22 +135,65 @@ class _FluidScreenState extends State<FluidScreen>
     final dt = (t - _time).clamp(0.0, 0.05);
     _time    = t;
 
-    // 4.3 — frame pacing: skip physics if frame is late, never skip render
-    if (dt < 0.033) {
-      final breathCycle = (t % 8.0) / 8.0;
-      _breath = (sin(breathCycle * 2 * pi - pi / 2) + 1.0) / 2.0;
+    // Breath animation always runs — never blocked
+    final breathCycle = (t % 8.0) / 8.0;
+    _breath = (sin(breathCycle * 2 * pi - pi / 2) + 1.0) / 2.0;
 
-      _touchForce = (_touchForce - dt * 1.5).clamp(0.0, 1.0);
-      _velocity   = _velocity * 0.88;
+    _touchForce = (_touchForce - dt * 1.5).clamp(0.0, 1.0);
+    _velocity   = _velocity * 0.88;
 
-      _velocityField.step(dt);
-
-      // 4.3 — texture throttle: upload every 2nd frame only
-      _frameCount++;
-      if (_frameCount % 2 == 0) _buildTexture();
+    // Dispatch physics to isolate only if previous one finished
+    // and frame isn't running late
+    if (!_physicsRunning && dt < 0.033) {
+      _dispatchPhysics(dt);
     }
 
+    // Render always happens regardless of physics state
     _repaint.value++;
+  }
+
+  void _dispatchPhysics(double dt) {
+    _physicsRunning = true;
+
+    // Snapshot current arrays — isolate gets independent copies
+    final velXSnap = Float32List.fromList(_velocityField.velX);
+    final velYSnap = Float32List.fromList(_velocityField.velY);
+
+    compute<List<dynamic>, Float32List>(
+      _physicsStep,
+      [velXSnap, velYSnap, dt],
+    ).then((Float32List result) {
+      const int n = VelocityField.kCells;
+
+      // Unpack updated velocity arrays back into our field
+      _velocityField.velX.setAll(0, result.sublist(0, n));
+      _velocityField.velY.setAll(0, result.sublist(n, n * 2));
+
+      // Unpack pixel channels into RGBA buffer
+      for (int i = 0; i < n; i++) {
+        _pixelBuffer[i * 4 + 0] = result[n * 2 + i].toInt(); // R = velX encoded
+        _pixelBuffer[i * 4 + 1] = result[n * 3 + i].toInt(); // G = velY encoded
+        _pixelBuffer[i * 4 + 2] = 0;
+        _pixelBuffer[i * 4 + 3] = 255;
+      }
+
+      // Decode into GPU texture — fast, pixels already ready
+      ui.decodeImageFromPixels(
+        _pixelBuffer,
+        VelocityField.kSize,
+        VelocityField.kSize,
+        ui.PixelFormat.rgba8888,
+        (ui.Image img) {
+          final old = _velocityTexture;
+          _velocityTexture = img;
+          old?.dispose();
+          _physicsRunning = false;
+        },
+      );
+    }).catchError((Object e) {
+      debugPrint('Physics isolate error: $e');
+      _physicsRunning = false;
+    });
   }
 
   void _onPanUpdate(DragUpdateDetails details) {
