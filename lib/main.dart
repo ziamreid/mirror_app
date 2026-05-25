@@ -28,21 +28,21 @@ class FluidScreen extends StatefulWidget {
 class _FluidScreenState extends State<FluidScreen>
     with SingleTickerProviderStateMixin {
   ui.FragmentShader? _shader;
-  late Ticker         _ticker;
-  bool                _loaded = false;
-  String?             _errorMessage;
+  late Ticker _ticker;
+  bool _loaded = false;
+  String? _errorMessage;
 
-  double _time       = 0.0;
-  double _breath     = 0.5;
-  Offset _touch      = const Offset(0.5, 0.5);
+  double _time = 0.0;
+  double _breath = 0.5;
+  Offset _touch = const Offset(0.5, 0.5);
   double _touchForce = 0.0;
-  Offset _velocity   = Offset.zero;
+  Offset _velocity = Offset.zero;
   final Offset _gyro = Offset.zero;
-  Size   _size       = Size.zero;
+  Size _size = Size.zero;
 
   final _velocityField = VelocityField();
   ui.Image? _velocityTexture;
-  bool      _textureBuilding = false;
+  bool _textureBuilding = false;
 
   final _repaint = ValueNotifier<int>(0);
 
@@ -68,20 +68,23 @@ class _FluidScreenState extends State<FluidScreen>
     }
   }
 
+  int _frameCount = 0;
+
   void _onTick(Duration elapsed) {
     if (!_loaded) return;
-    final t  = elapsed.inMilliseconds / 1000.0;
+    final t = elapsed.inMilliseconds / 1000.0;
     final dt = (t - _time).clamp(0.0, 0.05);
-    _time    = t;
+    _time = t;
 
     final breathCycle = (t % 8.0) / 8.0;
     _breath = (sin(breathCycle * 2 * pi - pi / 2) + 1.0) / 2.0;
 
     _touchForce = (_touchForce - dt * 1.5).clamp(0.0, 1.0);
-    _velocity   = _velocity * 0.88;
+    _velocity = _velocity * 0.88;
 
     _velocityField.step(dt);
-    _buildTexture();
+    _frameCount++;
+    if (_frameCount % 2 == 0) _buildTexture(); // 30hz texture, 60fps render
 
     _repaint.value++;
   }
@@ -94,13 +97,13 @@ class _FluidScreenState extends State<FluidScreen>
       final buffer = await ui.ImmutableBuffer.fromUint8List(pixels);
       final descriptor = ui.ImageDescriptor.raw(
         buffer,
-        width:       VelocityField.kSize,
-        height:      VelocityField.kSize,
+        width: VelocityField.kSize,
+        height: VelocityField.kSize,
         pixelFormat: ui.PixelFormat.rgba8888,
       );
       final codec = await descriptor.instantiateCodec();
       final frame = await codec.getNextFrame();
-      final old   = _velocityTexture;
+      final old = _velocityTexture;
       _velocityTexture = frame.image;
       old?.dispose();
       codec.dispose();
@@ -115,17 +118,18 @@ class _FluidScreenState extends State<FluidScreen>
 
   void _onPanUpdate(DragUpdateDetails details) {
     if (_size == Size.zero) return;
-    final nx     = details.localPosition.dx / _size.width;
-    final ny     = details.localPosition.dy / _size.height;
+    final nx = details.localPosition.dx / _size.width;
+    final ny = details.localPosition.dy / _size.height;
     final aspect = _size.width / _size.height;
     _velocityField.addForce(
-      nx, ny,
+      nx,
+      ny,
       details.delta.dx * 12.0 / _size.width,
       details.delta.dy * 12.0 / _size.height,
       aspect: aspect,
     );
-    _touch      = Offset(nx, ny);
-    _velocity   = Offset(
+    _touch = Offset(nx, ny);
+    _velocity = Offset(
       details.delta.dx / _size.width,
       details.delta.dy / _size.height,
     );
@@ -159,29 +163,27 @@ class _FluidScreenState extends State<FluidScreen>
                 ),
               )
             : _loaded && _shader != null && _velocityTexture != null
-                ? RepaintBoundary(
-                    child: CustomPaint(
-                      painter: _FluidPainter(
-                        shader:  _shader!,
-                        state:   this,
-                        repaint: _repaint,
-                      ),
-                      size: Size.infinite,
-                    ),
-                  )
-                : const Center(
-                    child: CircularProgressIndicator(
-                      color: Color(0xFF8844CC),
-                    ),
+            ? RepaintBoundary(
+                child: CustomPaint(
+                  painter: _FluidPainter(
+                    shader: _shader!,
+                    state: this,
+                    repaint: _repaint,
                   ),
+                  size: Size.infinite,
+                ),
+              )
+            : const Center(
+                child: CircularProgressIndicator(color: Color(0xFF8844CC)),
+              ),
       ),
     );
   }
 }
 
 class _FluidPainter extends CustomPainter {
-  final ui.FragmentShader  shader;
-  final _FluidScreenState  state;
+  final ui.FragmentShader shader;
+  final _FluidScreenState state;
 
   _FluidPainter({
     required this.shader,
@@ -195,16 +197,16 @@ class _FluidPainter extends CustomPainter {
     final texture = state._velocityTexture;
     if (texture == null) return;
 
-    shader.setFloat(0,  state._time);
-    shader.setFloat(1,  size.width);
-    shader.setFloat(2,  size.height);
-    shader.setFloat(3,  state._touch.dx);
-    shader.setFloat(4,  state._touch.dy);
-    shader.setFloat(5,  state._touchForce);
-    shader.setFloat(6,  state._velocity.dx);
-    shader.setFloat(7,  state._velocity.dy);
-    shader.setFloat(8,  state._breath);
-    shader.setFloat(9,  state._gyro.dx);
+    shader.setFloat(0, state._time);
+    shader.setFloat(1, size.width);
+    shader.setFloat(2, size.height);
+    shader.setFloat(3, state._touch.dx);
+    shader.setFloat(4, state._touch.dy);
+    shader.setFloat(5, state._touchForce);
+    shader.setFloat(6, state._velocity.dx);
+    shader.setFloat(7, state._velocity.dy);
+    shader.setFloat(8, state._breath);
+    shader.setFloat(9, state._gyro.dx);
     shader.setFloat(10, state._gyro.dy);
 
     shader.setImageSampler(0, texture);
