@@ -3,12 +3,12 @@
 // ─── Uniforms ────────────────────────────────────────────────────────────────
 uniform float     u_time;
 uniform vec2      u_resolution;
-uniform vec2      u_touch;        // kept alive — removed in Phase 4.3
-uniform float     u_touchForce;   // kept alive — removed in Phase 4.3
-uniform vec2      u_velocity;     // kept alive — removed in Phase 4.3
+uniform vec2      u_touch;
+uniform float     u_touchForce;
+uniform vec2      u_velocity;
 uniform float     u_breath;
-uniform vec2      u_gyro;         // Phase 3 — zero until gyro connected
-uniform sampler2D u_velocityField; // Phase 4.2 — 32×32 velocity grid texture
+uniform vec2      u_gyro;
+uniform sampler2D u_velocityField;
 
 out vec4 fragColor;
 
@@ -68,64 +68,71 @@ vec3 fluidColor(float f) {
   return color;
 }
 
-// ─── Main ─────────────────────────────────────────────────────────────────────
+// ─── Fix 1: smooth velocity sampler ─────────────────────────────────────────
+// Manually sample 4 neighbours and average them.
+// This replaces the hard 32x32 grid edges with smooth interpolation,
+// eliminating the pixelated blocks visible during fast drags.
+vec2 sampleVelocitySmooth(vec2 uv) {
+  // One texel size in UV space for a 32x32 texture
+  vec2 texel = vec2(1.0 / 32.0);
+
+  // Sample centre + 4 axis-aligned neighbours
+  vec2 c  = texture(u_velocityField, uv).rg;
+  vec2 n  = texture(u_velocityField, uv + vec2(0.0,       texel.y)).rg;
+  vec2 s  = texture(u_velocityField, uv + vec2(0.0,      -texel.y)).rg;
+  vec2 e  = texture(u_velocityField, uv + vec2( texel.x,  0.0    )).rg;
+  vec2 w  = texture(u_velocityField, uv + vec2(-texel.x,  0.0    )).rg;
+
+  // Weighted average: centre gets 2x weight, neighbours 1x each
+  vec2 smoothed = (c * 2.0 + n + s + e + w) / 6.0;
+
+  // Decode 0..1 → -1..1
+  return smoothed * 2.0 - 1.0;
+}
+
+// ─── Main ────────────────────────────────────────────────────────────────────
 void main() {
   vec2 fragCoord = FlutterFragCoord().xy;
   vec2 uv        = fragCoord / u_resolution;
 
-  // --- BREATH: scale pulse ---
+  // Breath scale pulse
   uv = (uv - 0.5) * (1.0 + u_breath * 0.008) + 0.5;
 
-  // ─── PHASE 4.2 — VELOCITY FIELD ADVECTION ────────────────────────────────
-  //
-  // Sample the 32×32 velocity texture at this pixel's UV.
-  // R channel = velX, G channel = velY.
-  // Encoded as 0..1 in texture, decode back to -1..1.
-  //
-  vec2 encodedVel = texture(u_velocityField, uv).rg;
-  vec2 vel        = encodedVel * 2.0 - 1.0;  // 0..1 → -1..1
-
-  // Advect the base UV — shift fBm sampling point by velocity.
-  // This is what makes the fluid visibly move where you drag.
-  // Strength 0.15 — strong enough to see, not so strong it tears.
+  // ─── Fix 1 applied: use smooth velocity instead of raw sample ────────────
+  vec2 vel    = sampleVelocitySmooth(uv);
   vec2 baseUV = uv + vel * 0.15;
 
-  // ─── DRIFT ───────────────────────────────────────────────────────────────
+  // ─── Drift ───────────────────────────────────────────────────────────────
   float driftX = u_time * 0.02;
-  float driftY = u_time * 0.12;  // upward scroll
+  float driftY = u_time * 0.12;
 
-  // ─── THREE DEPTH LAYERS ──────────────────────────────────────────────────
-  // Background: slow, large scale
+  // ─── Three depth layers ──────────────────────────────────────────────────
   vec2  bgUV  = baseUV * 1.8 + u_gyro * 0.3 + vec2(driftX * 0.3, -driftY * 0.15);
   float bgT   = u_time * 0.3 * 0.25;
   float bgF   = fluidLayer(bgUV + vec2(0.0, 0.0), bgT);
   bgF         = 0.5 + 0.5 * bgF;
   bgF         = pow(bgF, 1.9);
 
-  // Midground: medium speed, medium scale
   vec2  midUV = baseUV * 2.4 + u_gyro * 0.6 + vec2(driftX * 0.6, -driftY * 0.30);
   float midT  = u_time * 0.6 * 0.25;
   float midF  = fluidLayer(midUV + vec2(3.7, 5.1), midT);
   midF        = 0.5 + 0.5 * midF;
   midF        = pow(midF, 1.7);
 
-  // Foreground: fast, fine detail
   vec2  fgUV  = baseUV * 3.2 + u_gyro * 1.0 + vec2(driftX * 1.0, -driftY * 0.50);
   float fgT   = u_time * 1.0 * 0.25;
   float fgF   = fluidLayer(fgUV + vec2(7.3, 2.8), fgT);
   fgF         = 0.5 + 0.5 * fgF;
   fgF         = pow(fgF, 1.6);
 
-  // ─── COMPOSITE ───────────────────────────────────────────────────────────
+  // ─── Composite ───────────────────────────────────────────────────────────
   vec3 color = vec3(0.04, 0.03, 0.10);
   color += fluidColor(bgF)  * 0.40;
   color += fluidColor(midF) * 0.65;
   color += fluidColor(fgF)  * 0.85;
 
-  // Soft tonemap — prevents additive blowout
   color = color / (1.0 + color);
 
-  // Breathing luminosity
   float breathMod = 1.0 + (u_breath - 0.5) * 0.16;
   color *= breathMod;
 
