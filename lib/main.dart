@@ -1,5 +1,4 @@
 import 'dart:math';
-import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
@@ -29,25 +28,20 @@ class FluidScreen extends StatefulWidget {
 class _FluidScreenState extends State<FluidScreen>
     with SingleTickerProviderStateMixin {
   ui.FragmentShader? _shader;
-  late Ticker _ticker;
-  bool _loaded = false;
+  late Ticker         _ticker;
+  bool                _loaded = false;
 
   double _time       = 0.0;
   double _breath     = 0.5;
   Offset _touch      = const Offset(0.5, 0.5);
   double _touchForce = 0.0;
   Offset _velocity   = Offset.zero;
-  Offset _gyro       = Offset.zero;
+  final Offset _gyro = Offset.zero;
   Size   _size       = Size.zero;
 
-  // Phase 4.1 — velocity grid
   final _velocityField = VelocityField();
-
-  // Phase 4.2 — texture that carries the grid to the shader
   ui.Image? _velocityTexture;
-
-  // Track in-flight texture build so we don't stack async calls
-  bool _textureBuilding = false;
+  bool      _textureBuilding = false;
 
   final _repaint = ValueNotifier<int>(0);
 
@@ -60,11 +54,15 @@ class _FluidScreenState extends State<FluidScreen>
   }
 
   Future<void> _loadShader() async {
-    final program = await ui.FragmentProgram.fromAsset(
-      'assets/shaders/fluid.frag',
-    );
-    _shader = program.fragmentShader();
-    setState(() => _loaded = true);
+    try {
+      final program = await ui.FragmentProgram.fromAsset(
+        'assets/shaders/fluid.frag',
+      );
+      _shader = program.fragmentShader();
+      if (mounted) setState(() => _loaded = true);
+    } catch (e) {
+      debugPrint('Shader load error: $e');
+    }
   }
 
   void _onTick(Duration elapsed) {
@@ -79,25 +77,17 @@ class _FluidScreenState extends State<FluidScreen>
     _touchForce = (_touchForce - dt * 1.5).clamp(0.0, 1.0);
     _velocity   = _velocity * 0.88;
 
-    // Phase 4.1 — evolve velocity field
     _velocityField.step(dt);
-
-    // Phase 4.2 — encode grid as texture (non-stacking async)
     _buildTexture();
 
     _repaint.value++;
   }
 
-  /// Encode the 32×32 velocity grid as a ui.Image every frame.
-  /// Uses ImmutableBuffer + ImageDescriptor — faster than decodeImageFromPixels,
-  /// no intermediate allocations. Guard flag prevents stacking async calls.
   Future<void> _buildTexture() async {
-    if (_textureBuilding) return; // skip if last frame's upload isn't done
+    if (_textureBuilding) return;
     _textureBuilding = true;
-
     try {
       final pixels = _velocityField.toPixels();
-
       final buffer = await ui.ImmutableBuffer.fromUint8List(pixels);
       final descriptor = ui.ImageDescriptor.raw(
         buffer,
@@ -107,15 +97,14 @@ class _FluidScreenState extends State<FluidScreen>
       );
       final codec = await descriptor.instantiateCodec();
       final frame = await codec.getNextFrame();
-
-      final oldTexture = _velocityTexture;
+      final old   = _velocityTexture;
       _velocityTexture = frame.image;
-      oldTexture?.dispose();
-
-      // Cleanup
+      old?.dispose();
       codec.dispose();
       descriptor.dispose();
       buffer.dispose();
+    } catch (e) {
+      debugPrint('Texture build error: $e');
     } finally {
       _textureBuilding = false;
     }
@@ -123,10 +112,8 @@ class _FluidScreenState extends State<FluidScreen>
 
   void _onPanUpdate(DragUpdateDetails details) {
     if (_size == Size.zero) return;
-
-    final nx = details.localPosition.dx / _size.width;
-    final ny = details.localPosition.dy / _size.height;
-
+    final nx     = details.localPosition.dx / _size.width;
+    final ny     = details.localPosition.dy / _size.height;
     final aspect = _size.width / _size.height;
     _velocityField.addForce(
       nx, ny,
@@ -134,8 +121,6 @@ class _FluidScreenState extends State<FluidScreen>
       details.delta.dy * 12.0 / _size.height,
       aspect: aspect,
     );
-
-    // Keep old uniforms alive — Phase 4.3 removes them
     _touch      = Offset(nx, ny);
     _velocity   = Offset(
       details.delta.dx / _size.width,
@@ -177,8 +162,8 @@ class _FluidScreenState extends State<FluidScreen>
 }
 
 class _FluidPainter extends CustomPainter {
-  final ui.FragmentShader shader;
-  final _FluidScreenState state;
+  final ui.FragmentShader  shader;
+  final _FluidScreenState  state;
 
   _FluidPainter({
     required this.shader,
@@ -200,7 +185,6 @@ class _FluidPainter extends CustomPainter {
     shader.setFloat(9,  state._gyro.dx);
     shader.setFloat(10, state._gyro.dy);
 
-    // Phase 4.2 — velocity field texture (sampler slot 0)
     if (state._velocityTexture != null) {
       shader.setImageSampler(0, state._velocityTexture!);
     }
