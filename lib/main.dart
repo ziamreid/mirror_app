@@ -30,6 +30,7 @@ class _FluidScreenState extends State<FluidScreen>
   ui.FragmentShader? _shader;
   late Ticker         _ticker;
   bool                _loaded = false;
+  String?             _errorMessage;
 
   double _time       = 0.0;
   double _breath     = 0.5;
@@ -59,9 +60,11 @@ class _FluidScreenState extends State<FluidScreen>
         'assets/shaders/fluid.frag',
       );
       _shader = program.fragmentShader();
+      // Build the first texture before we allow painting
+      await _buildTexture();
       if (mounted) setState(() => _loaded = true);
     } catch (e) {
-      debugPrint('Shader load error: $e');
+      if (mounted) setState(() => _errorMessage = e.toString());
     }
   }
 
@@ -144,18 +147,33 @@ class _FluidScreenState extends State<FluidScreen>
       backgroundColor: Colors.black,
       body: GestureDetector(
         onPanUpdate: _onPanUpdate,
-        child: _loaded && _shader != null
-            ? RepaintBoundary(
-                child: CustomPaint(
-                  painter: _FluidPainter(
-                    shader:  _shader!,
-                    state:   this,
-                    repaint: _repaint,
+        child: _errorMessage != null
+            ? Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Text(
+                    'Error: $_errorMessage',
+                    style: const TextStyle(color: Colors.red, fontSize: 12),
+                    textAlign: TextAlign.center,
                   ),
-                  size: Size.infinite,
                 ),
               )
-            : const SizedBox.shrink(),
+            : _loaded && _shader != null && _velocityTexture != null
+                ? RepaintBoundary(
+                    child: CustomPaint(
+                      painter: _FluidPainter(
+                        shader:  _shader!,
+                        state:   this,
+                        repaint: _repaint,
+                      ),
+                      size: Size.infinite,
+                    ),
+                  )
+                : const Center(
+                    child: CircularProgressIndicator(
+                      color: Color(0xFF8844CC),
+                    ),
+                  ),
       ),
     );
   }
@@ -173,6 +191,10 @@ class _FluidPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
+    // Safety guard — never paint without a texture
+    final texture = state._velocityTexture;
+    if (texture == null) return;
+
     shader.setFloat(0,  state._time);
     shader.setFloat(1,  size.width);
     shader.setFloat(2,  size.height);
@@ -185,9 +207,7 @@ class _FluidPainter extends CustomPainter {
     shader.setFloat(9,  state._gyro.dx);
     shader.setFloat(10, state._gyro.dy);
 
-    if (state._velocityTexture != null) {
-      shader.setImageSampler(0, state._velocityTexture!);
-    }
+    shader.setImageSampler(0, texture);
 
     canvas.drawRect(
       Rect.fromLTWH(0, 0, size.width, size.height),
