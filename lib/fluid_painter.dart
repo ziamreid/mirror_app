@@ -1,24 +1,18 @@
 import 'dart:math';
-import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'velocity_field.dart';
 
+// ── Trail point ───────────────────────────────────────────────────────────────
 class TrailPoint {
   double x, y, age;
   TrailPoint(this.x, this.y) : age = 0.0;
 }
 
+// ── Engine: pure Dart state, no offscreen buffers ─────────────────────────────
 class FluidEngine {
-  static const int    _kTrailLen   = 24;
-  static const double _kTrailDecay = 0.055;
-
-  ui.Image? _bufA;
-  ui.Image? _bufB;
-  bool      _pingIsA = true;
-
-  int _w = 0;
-  int _h = 0;
+  static const int    _kTrailLen   = 48;   // more points = smoother tube
+  static const double _kTrailDecay = 0.04; // very slow fade
 
   Offset _touch      = const Offset(0.5, 0.5);
   Offset _velocity   = Offset.zero;
@@ -34,7 +28,7 @@ class FluidEngine {
   void tick(double dt) {
     _touchForce = (_touchForce - dt * 1.5).clamp(0.0, 1.0);
     _touchBurst = (_touchBurst - dt * 4.0).clamp(0.0, 1.0);
-    _velocity   = _velocity * 0.90;
+    _velocity   = _velocity * 0.88;
     for (final p in trail) {
       p.age = (p.age + dt * _kTrailDecay).clamp(0.0, 1.0);
     }
@@ -50,336 +44,255 @@ class FluidEngine {
     _trailHead = (_trailHead + 1) % _kTrailLen;
   }
 
-  void setTouch(Offset t)        => _touch = t;
-  void setVelocity(Offset v)     => _velocity = v;
-  void setTouchForce(double f)   => _touchForce = f;
-  void setTouchBurst(double b)   => _touchBurst = b;
+  void setTouch(Offset t)      => _touch = t;
+  void setVelocity(Offset v)   => _velocity = v;
+  void setTouchForce(double f) => _touchForce = f;
+  void setTouchBurst(double b) => _touchBurst = b;
 
   Offset get touch      => _touch;
   Offset get velocity   => _velocity;
   double get touchForce => _touchForce;
-
-  Future<ui.Image> renderFrame(Size size) async {
-    final w = size.width.toInt();
-    final h = size.height.toInt();
-
-    if (_w != w || _h != h || _bufA == null || _bufB == null) {
-      _w = w; _h = h;
-      _bufA?.dispose();
-      _bufB?.dispose();
-      _bufA = await _createBlackImage(w, h);
-      _bufB = await _createBlackImage(w, h);
-      _pingIsA = true;
-    }
-
-    final src = _pingIsA ? _bufA! : _bufB!;
-
-    final recorder = ui.PictureRecorder();
-    final canvas   = Canvas(recorder,
-        Rect.fromLTWH(0, 0, w.toDouble(), h.toDouble()));
-
-    _drawAdvected(canvas, src, w, h);
-
-    canvas.drawRect(
-      Rect.fromLTWH(0, 0, w.toDouble(), h.toDouble()),
-      Paint()..color = const Color(0x08000000),
-    );
-
-    _injectInk(canvas, w, h);
-
-    final picture = recorder.endRecording();
-    final newImg  = await picture.toImage(w, h);
-    picture.dispose();
-
-    if (_pingIsA) {
-      _bufB?.dispose();
-      _bufB = newImg;
-      _pingIsA = false;
-    } else {
-      _bufA?.dispose();
-      _bufA = newImg;
-      _pingIsA = true;
-    }
-
-    return _pingIsA ? _bufA! : _bufB!;
-  }
-
-  void _drawAdvected(Canvas canvas, ui.Image src, int w, int h) {
-    final fw = w.toDouble();
-    final fh = h.toDouble();
-
-    final gx = (_touch.dx * (VelocityField.kSize - 1)).clamp(0, VelocityField.kSize - 1).toInt();
-    final gy = (_touch.dy * (VelocityField.kSize - 1)).clamp(0, VelocityField.kSize - 1).toInt();
-    double avgVx = 0, avgVy = 0;
-    int cnt = 0;
-    for (int dy = -2; dy <= 2; dy++) {
-      for (int dx = -2; dx <= 2; dx++) {
-        final nx = (gx + dx).clamp(0, VelocityField.kSize - 1);
-        final ny = (gy + dy).clamp(0, VelocityField.kSize - 1);
-        avgVx += velocityField.velX[ny * VelocityField.kSize + nx];
-        avgVy += velocityField.velY[ny * VelocityField.kSize + nx];
-        cnt++;
-      }
-    }
-    avgVx /= cnt;
-    avgVy /= cnt;
-
-    final pixVx = avgVx * fw * 0.5;
-    final pixVy = avgVy * fh * 0.5;
-    final speed = sqrt(pixVx * pixVx + pixVy * pixVy);
-
-    canvas.drawImage(src, Offset.zero, Paint());
-
-    if (speed < 0.5) return;
-
-    const int steps = 5;
-    for (int s = 1; s <= steps; s++) {
-      final t  = s / steps.toDouble();
-      final op = 0.12 * (1.0 - t * 0.6);
-      final dx = pixVx * t * 0.18;
-      final dy = pixVy * t * 0.18;
-      canvas.drawImage(
-        src,
-        Offset(dx, dy),
-        Paint()
-          ..color     = Color.fromARGB((op * 255).round(), 255, 255, 255)
-          ..blendMode = BlendMode.srcOver,
-      );
-    }
-  }
-
-  void _injectInk(Canvas canvas, int w, int h) {
-    final fw = w.toDouble();
-    final fh = h.toDouble();
-
-    for (int i = 0; i < _kTrailLen; i++) {
-      final p = trail[i];
-      if (p.age >= 1.0) continue;
-
-      final ageCurved = p.age * p.age;
-      final op = (1.0 - ageCurved).clamp(0.0, 1.0);
-      final r  = fh * mix(0.11, 0.022, p.age);
-      final px = p.x * fw;
-      final py = p.y * fh;
-
-      // NO MaskFilter.blur, NO BlendMode.plus anywhere
-      // Soft edge comes purely from the radial gradient stopping at 0x00
-
-      // Outer aura
-      canvas.drawCircle(
-        Offset(px, py),
-        r * 2.4,
-        Paint()
-          ..blendMode = BlendMode.srcOver
-          ..shader    = ui.Gradient.radial(
-            Offset(px, py), r * 2.4,
-            [
-              Color.fromARGB((op * 28).clamp(0, 255).toInt(),  90, 15, 200),
-              Color.fromARGB((op * 10).clamp(0, 255).toInt(),  60, 10, 160),
-              const Color(0x00000000),
-            ],
-            [0.0, 0.5, 1.0],
-          ),
-      );
-
-      // Main glow body
-      canvas.drawCircle(
-        Offset(px, py),
-        r * 1.2,
-        Paint()
-          ..blendMode = BlendMode.srcOver
-          ..shader    = ui.Gradient.radial(
-            Offset(px, py), r * 1.2,
-            [
-              Color.fromARGB((op * 160).clamp(0, 255).toInt(), 180, 60, 255),
-              Color.fromARGB((op * 80).clamp(0, 255).toInt(),  120, 20, 220),
-              Color.fromARGB((op * 20).clamp(0, 255).toInt(),   80, 10, 180),
-              const Color(0x00000000),
-            ],
-            [0.0, 0.4, 0.75, 1.0],
-          ),
-      );
-
-      // Bright core
-      canvas.drawCircle(
-        Offset(px, py),
-        r * 0.38,
-        Paint()
-          ..blendMode = BlendMode.srcOver
-          ..shader    = ui.Gradient.radial(
-            Offset(px, py), r * 0.38,
-            [
-              Color.fromARGB((op * 220).clamp(0, 255).toInt(), 235, 190, 255),
-              Color.fromARGB((op * 80).clamp(0, 255).toInt(),  180,  60, 255),
-              const Color(0x00000000),
-            ],
-            [0.0, 0.6, 1.0],
-          ),
-      );
-    }
-
-    // ── Live finger blob ─────────────────────────────────────────────────────
-    if (_touchForce > 0.01) {
-      final fx = _touch.dx * fw;
-      final fy = _touch.dy * fh;
-      final r  = fh * 0.088 * _touchForce;
-
-      canvas.drawCircle(
-        Offset(fx, fy),
-        r * 3.0,
-        Paint()
-          ..blendMode = BlendMode.srcOver
-          ..shader    = ui.Gradient.radial(
-            Offset(fx, fy), r * 3.0,
-            [
-              Color.fromARGB((_touchForce * 25).clamp(0, 255).toInt(), 110, 25, 230),
-              Color.fromARGB((_touchForce *  8).clamp(0, 255).toInt(),  80, 15, 180),
-              const Color(0x00000000),
-            ],
-            [0.0, 0.5, 1.0],
-          ),
-      );
-
-      canvas.drawCircle(
-        Offset(fx, fy),
-        r * 1.1,
-        Paint()
-          ..blendMode = BlendMode.srcOver
-          ..shader    = ui.Gradient.radial(
-            Offset(fx, fy), r * 1.1,
-            [
-              Color.fromARGB((_touchForce * 180).clamp(0, 255).toInt(), 195, 85, 255),
-              Color.fromARGB((_touchForce * 100).clamp(0, 255).toInt(), 130, 30, 230),
-              Color.fromARGB((_touchForce *  25).clamp(0, 255).toInt(),  80, 10, 190),
-              const Color(0x00000000),
-            ],
-            [0.0, 0.45, 0.75, 1.0],
-          ),
-      );
-
-      canvas.drawCircle(
-        Offset(fx, fy),
-        r * 0.30,
-        Paint()
-          ..blendMode = BlendMode.srcOver
-          ..shader    = ui.Gradient.radial(
-            Offset(fx, fy), r * 0.30,
-            [
-              Color.fromARGB((_touchForce * 245).clamp(0, 255).toInt(), 250, 210, 255),
-              Color.fromARGB((_touchForce * 120).clamp(0, 255).toInt(), 200,  90, 255),
-              const Color(0x00000000),
-            ],
-            [0.0, 0.55, 1.0],
-          ),
-      );
-
-      // Velocity streak
-      final vel    = _velocity;
-      final velMag = sqrt(vel.dx * vel.dx + vel.dy * vel.dy);
-      if (velMag > 0.0006) {
-        final nx        = vel.dx / velMag;
-        final ny        = vel.dy / velMag;
-        final streakLen = (velMag * fw * 6.0).clamp(0.0, fh * 0.28);
-
-        canvas.drawLine(
-          Offset(fx, fy),
-          Offset(fx + nx * streakLen, fy + ny * streakLen),
-          Paint()
-            ..blendMode  = BlendMode.srcOver
-            ..strokeWidth = r * 1.8
-            ..strokeCap  = StrokeCap.round
-            ..style      = PaintingStyle.stroke
-            ..shader     = ui.Gradient.linear(
-              Offset(fx, fy),
-              Offset(fx + nx * streakLen, fy + ny * streakLen),
-              [
-                Color.fromARGB((_touchForce * 45).clamp(0, 255).toInt(), 150, 50, 255),
-                const Color(0x00000000),
-              ],
-            ),
-        );
-
-        canvas.drawLine(
-          Offset(fx, fy),
-          Offset(fx + nx * streakLen, fy + ny * streakLen),
-          Paint()
-            ..blendMode  = BlendMode.srcOver
-            ..strokeWidth = r * 0.45
-            ..strokeCap  = StrokeCap.round
-            ..style      = PaintingStyle.stroke
-            ..shader     = ui.Gradient.linear(
-              Offset(fx, fy),
-              Offset(fx + nx * streakLen, fy + ny * streakLen),
-              [
-                Color.fromARGB((_touchForce * 200).clamp(0, 255).toInt(), 235, 190, 255),
-                const Color(0x00000000),
-              ],
-            ),
-        );
-      }
-    }
-
-    // Touch burst
-    if (_touchBurst > 0.02) {
-      final fx = _touch.dx * fw;
-      final fy = _touch.dy * fh;
-      final r  = fh * 0.15 * _touchBurst;
-      canvas.drawCircle(
-        Offset(fx, fy),
-        r,
-        Paint()
-          ..blendMode = BlendMode.srcOver
-          ..shader    = ui.Gradient.radial(
-            Offset(fx, fy), r,
-            [
-              Color.fromARGB(
-                  (_touchBurst * _touchBurst * 80).clamp(0, 255).toInt(),
-                  210, 160, 255),
-              const Color(0x00000000),
-            ],
-          ),
-      );
-    }
-  }
-
-  Future<ui.Image> _createBlackImage(int w, int h) async {
-    final rec = ui.PictureRecorder();
-    final c   = Canvas(rec, Rect.fromLTWH(0, 0, w.toDouble(), h.toDouble()));
-    c.drawRect(Rect.fromLTWH(0, 0, w.toDouble(), h.toDouble()),
-        Paint()..color = const Color(0xFF000000));
-    final pic = rec.endRecording();
-    final img = await pic.toImage(w, h);
-    pic.dispose();
-    return img;
-  }
-
-  void dispose() {
-    _bufA?.dispose();
-    _bufB?.dispose();
-    _bufA = null;
-    _bufB = null;
-  }
+  double get touchBurst => _touchBurst;
 }
 
-double mix(double a, double b, double t) => a + (b - a) * t;
-
+// ── Painter: draws directly on screen, zero offscreen buffers ────────────────
 class FluidPainter extends CustomPainter {
-  final ui.Image? displayImage;
+  final FluidEngine engine;
+  final Size        screenSize;
 
-  FluidPainter({required this.displayImage, required Listenable repaint})
-      : super(repaint: repaint);
+  FluidPainter({
+    required this.engine,
+    required this.screenSize,
+    required Listenable repaint,
+  }) : super(repaint: repaint);
 
   @override
   void paint(Canvas canvas, Size size) {
+    final fw = size.width;
+    final fh = size.height;
+
+    // Black background
     canvas.drawRect(
-      Rect.fromLTWH(0, 0, size.width, size.height),
+      Rect.fromLTWH(0, 0, fw, fh),
       Paint()..color = const Color(0xFF000000),
     );
-    if (displayImage != null) {
-      canvas.drawImage(displayImage!, Offset.zero, Paint());
+
+    _drawTrail(canvas, fw, fh);
+    _drawFinger(canvas, fw, fh);
+  }
+
+  // ── Trail: one filled Path per layer, no per-point draw calls ───────────────
+  // This avoids the accumulation problem of overlapping srcOver circles.
+  // We build a single smooth stroke path through all trail points and draw
+  // it as a tapered stroke — one draw call, no overlap artifacts.
+  void _drawTrail(Canvas canvas, double fw, double fh) {
+    // Collect active points in order (newest first from ring buffer)
+    final pts = <TrailPoint>[];
+    for (int i = 0; i < FluidEngine._kTrailLen; i++) {
+      final idx = (engine._trailHead - 1 - i + FluidEngine._kTrailLen) % FluidEngine._kTrailLen;
+      final p = engine.trail[idx];
+      if (p.age >= 0.99) break;
+      pts.add(p);
+    }
+    if (pts.length < 2) return;
+
+    // Draw 3 layers: outer aura, main body, bright core
+    // Each layer is a single Path with varying stroke width at each segment
+    _drawTubeLayer(canvas, pts, fw, fh,
+      radiusFactor:  2.2,
+      colorNew: const Color(0x1A5A0FC8),
+      colorOld: const Color(0x003C0A80),
+    );
+    _drawTubeLayer(canvas, pts, fw, fh,
+      radiusFactor:  1.0,
+      colorNew: const Color(0xCCB43CFF),
+      colorOld: const Color(0x00500ACC),
+    );
+    _drawTubeLayer(canvas, pts, fw, fh,
+      radiusFactor:  0.35,
+      colorNew: const Color(0xFFEBBEFF),
+      colorOld: const Color(0x00C040FF),
+    );
+  }
+
+  void _drawTubeLayer(
+    Canvas canvas,
+    List<TrailPoint> pts,
+    double fw,
+    double fh, {
+    required double radiusFactor,
+    required Color  colorNew,
+    required Color  colorOld,
+  }) {
+    // Draw each segment as a rounded line with width tapering by age.
+    // Using individual segments (not one Path) so width can vary.
+    // No overlap artifacts because each segment is drawn once.
+    for (int i = 0; i < pts.length - 1; i++) {
+      final a = pts[i];
+      final b = pts[i + 1];
+
+      final ageA = a.age;
+      final ageB = b.age;
+
+      // Skip fully faded
+      if (ageA >= 0.99 && ageB >= 0.99) continue;
+
+      final opA = pow(1.0 - ageA.clamp(0.0, 1.0), 1.5) as double;
+      final opB = pow(1.0 - ageB.clamp(0.0, 1.0), 1.5) as double;
+      final opAvg = (opA + opB) * 0.5;
+
+      if (opAvg < 0.005) continue;
+
+      // Radius tapers from large (new) to small (old)
+      final rA = fh * mix(0.09, 0.012, ageA) * radiusFactor;
+      final rB = fh * mix(0.09, 0.012, ageB) * radiusFactor;
+      final rAvg = (rA + rB) * 0.5;
+
+      final ax = a.x * fw;
+      final ay = a.y * fh;
+      final bx = b.x * fw;
+      final by = b.y * fh;
+
+      // Interpolate color opacity
+      final col = Color.lerp(colorOld, colorNew, opAvg)!
+          .withOpacity((Color.lerp(colorOld, colorNew, opAvg)!.opacity * opAvg).clamp(0.0, 1.0));
+
+      canvas.drawLine(
+        Offset(ax, ay),
+        Offset(bx, by),
+        Paint()
+          ..color      = col
+          ..strokeWidth = rAvg * 2.0
+          ..strokeCap  = StrokeCap.round
+          ..style      = PaintingStyle.stroke
+          ..blendMode  = BlendMode.screen, // screen = bright on black, no blowout
+      );
+    }
+  }
+
+  // ── Live finger blob ─────────────────────────────────────────────────────────
+  void _drawFinger(Canvas canvas, double fw, double fh) {
+    final tf = engine.touchForce;
+    if (tf < 0.01) return;
+
+    final fx = engine.touch.dx * fw;
+    final fy = engine.touch.dy * fh;
+    final r  = fh * 0.075 * tf;
+
+    // Outer soft aura — one circle, screen blend
+    canvas.drawCircle(
+      Offset(fx, fy),
+      r * 2.8,
+      Paint()
+        ..blendMode = BlendMode.screen
+        ..shader    = ui.Gradient.radial(
+          Offset(fx, fy), r * 2.8,
+          [
+            Color.fromARGB((tf * 22).clamp(0, 255).toInt(), 100, 20, 220),
+            const Color(0x00000000),
+          ],
+        ),
+    );
+
+    // Main body
+    canvas.drawCircle(
+      Offset(fx, fy),
+      r,
+      Paint()
+        ..blendMode = BlendMode.screen
+        ..shader    = ui.Gradient.radial(
+          Offset(fx, fy), r,
+          [
+            Color.fromARGB((tf * 200).clamp(0, 255).toInt(), 190, 80, 255),
+            Color.fromARGB((tf * 90).clamp(0, 255).toInt(),  120, 25, 230),
+            const Color(0x00000000),
+          ],
+          [0.0, 0.5, 1.0],
+        ),
+    );
+
+    // White-violet hot core
+    canvas.drawCircle(
+      Offset(fx, fy),
+      r * 0.28,
+      Paint()
+        ..blendMode = BlendMode.screen
+        ..shader    = ui.Gradient.radial(
+          Offset(fx, fy), r * 0.28,
+          [
+            Color.fromARGB((tf * 255).clamp(0, 255).toInt(), 252, 215, 255),
+            const Color(0x00000000),
+          ],
+        ),
+    );
+
+    // Velocity streak
+    final vel    = engine.velocity;
+    final velMag = sqrt(vel.dx * vel.dx + vel.dy * vel.dy);
+    if (velMag > 0.0005) {
+      final nx        = vel.dx / velMag;
+      final ny        = vel.dy / velMag;
+      final streakLen = (velMag * fw * 7.0).clamp(0.0, fh * 0.25);
+
+      canvas.drawLine(
+        Offset(fx, fy),
+        Offset(fx + nx * streakLen, fy + ny * streakLen),
+        Paint()
+          ..blendMode  = BlendMode.screen
+          ..strokeWidth = r * 1.6
+          ..strokeCap  = StrokeCap.round
+          ..style      = PaintingStyle.stroke
+          ..shader     = ui.Gradient.linear(
+            Offset(fx, fy),
+            Offset(fx + nx * streakLen, fy + ny * streakLen),
+            [
+              Color.fromARGB((tf * 40).clamp(0, 255).toInt(), 160, 55, 255),
+              const Color(0x00000000),
+            ],
+          ),
+      );
+
+      canvas.drawLine(
+        Offset(fx, fy),
+        Offset(fx + nx * streakLen, fy + ny * streakLen),
+        Paint()
+          ..blendMode  = BlendMode.screen
+          ..strokeWidth = r * 0.4
+          ..strokeCap  = StrokeCap.round
+          ..style      = PaintingStyle.stroke
+          ..shader     = ui.Gradient.linear(
+            Offset(fx, fy),
+            Offset(fx + nx * streakLen, fy + ny * streakLen),
+            [
+              Color.fromARGB((tf * 210).clamp(0, 255).toInt(), 238, 192, 255),
+              const Color(0x00000000),
+            ],
+          ),
+      );
+    }
+
+    // Touch burst
+    final tb = engine.touchBurst;
+    if (tb > 0.02) {
+      final br = fh * 0.14 * tb;
+      canvas.drawCircle(
+        Offset(fx, fy),
+        br,
+        Paint()
+          ..blendMode = BlendMode.screen
+          ..shader    = ui.Gradient.radial(
+            Offset(fx, fy), br,
+            [
+              Color.fromARGB((tb * tb * 75).clamp(0, 255).toInt(), 215, 165, 255),
+              const Color(0x00000000),
+            ],
+          ),
+      );
     }
   }
 
   @override
-  bool shouldRepaint(FluidPainter old) => old.displayImage != displayImage;
+  bool shouldRepaint(FluidPainter old) => true;
 }
+
+double mix(double a, double b, double t) => a + (b - a) * t;

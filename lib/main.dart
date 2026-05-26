@@ -1,7 +1,5 @@
-import 'dart:async';
 import 'dart:math';
 import 'dart:typed_data';
-import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
@@ -41,15 +39,12 @@ class FluidScreen extends StatefulWidget {
 class _FluidScreenState extends State<FluidScreen>
     with SingleTickerProviderStateMixin {
   late Ticker _ticker;
-  double      _prevT = 0.0;
-  Size        _size  = Size.zero;
+  double _prevT = 0.0;
+  Size   _size  = Size.zero;
 
-  final FluidEngine _engine = FluidEngine();
-  ui.Image? _displayImage;
-  bool      _rendering       = false;
-  bool      _physicsRunning  = false;
-
+  final FluidEngine   _engine  = FluidEngine();
   final _repaint = ValueNotifier<int>(0);
+  bool _physicsRunning = false;
 
   @override
   void initState() {
@@ -67,14 +62,7 @@ class _FluidScreenState extends State<FluidScreen>
     _engine.tick(dt);
     if (!_physicsRunning) _dispatchPhysics(dt);
 
-    if (!_rendering) {
-      _rendering = true;
-      _engine.renderFrame(_size).then((img) {
-        _displayImage = img;
-        _rendering    = false;
-        _repaint.value++;
-      });
-    }
+    _repaint.value++;
   }
 
   void _dispatchPhysics(double dt) {
@@ -103,7 +91,6 @@ class _FluidScreenState extends State<FluidScreen>
     _engine.setTouchBurst(1.0);
     _engine.setVelocity(Offset.zero);
     _engine.pushTrail(nx, ny);
-    // Radial burst force on touch
     for (final dir in [
       const Offset( 0.10,  0.00),
       const Offset(-0.10,  0.00),
@@ -124,12 +111,12 @@ class _FluidScreenState extends State<FluidScreen>
 
     _engine.setTouch(Offset(nx, ny));
     final prev = _engine.velocity;
-    // Accumulate velocity with heavy smoothing so it lingers
-    _engine.setVelocity(Offset(prev.dx * 0.75 + vx * 0.25,
-                               prev.dy * 0.75 + vy * 0.25));
+    _engine.setVelocity(Offset(
+      prev.dx * 0.75 + vx * 0.25,
+      prev.dy * 0.75 + vy * 0.25,
+    ));
     _engine.setTouchForce(1.0);
     _engine.pushTrail(nx, ny);
-    // Strong directional force
     _engine.velocityField.addForce(nx, ny, vx * 22.0, vy * 22.0, aspect: as);
   }
 
@@ -151,7 +138,6 @@ class _FluidScreenState extends State<FluidScreen>
   @override
   void dispose() {
     _ticker.dispose();
-    _engine.dispose();
     _repaint.dispose();
     super.dispose();
   }
@@ -170,8 +156,9 @@ class _FluidScreenState extends State<FluidScreen>
             valueListenable: _repaint,
             builder: (_, __, ___) => CustomPaint(
               painter: FluidPainter(
-                displayImage: _displayImage,
-                repaint: _repaint,
+                engine:     _engine,
+                screenSize: _size,
+                repaint:    _repaint,
               ),
               size: Size.infinite,
             ),
