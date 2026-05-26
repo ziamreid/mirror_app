@@ -118,7 +118,7 @@ void main() {
   float dist     = length(toTouch);
 
   // Influence: strong within ~30% of screen, fades beyond
-  float influence = u_touchForce * 0.12 / (dist * dist + 0.02);
+  float influence = u_touchForce * 0.12 / (dist * dist + 0.04);
   influence = clamp(influence, 0.0, 1.0);
 
   // Noise field offset by velocity direction — makes curl align with drag
@@ -126,7 +126,7 @@ void main() {
   vec2 curlVec  = curl(curlSeed, u_time * 0.2);
 
   // Apply curl displacement — strength tuned so fast drag = visible swirl
-  vec2 baseUV = uv + curlVec * influence * 0.18;
+  vec2 baseUV = uv + curlVec * influence * 0.35;
 
   // Also keep a tiny amount of grid velocity for ambient drift feel
   // Decoded from texture but at very low strength — no blocks at 0.02
