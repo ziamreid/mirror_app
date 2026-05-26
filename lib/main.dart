@@ -114,13 +114,14 @@ class _FluidScreenState extends State<FluidScreen>
       prev.dy * 0.75 + vy * 0.25,
     ));
     _engine.setTouchForce(1.0);
-    _engine.pushTrail(nx, ny);
+    // interpolated push — fills gaps during fast drag
+    _engine.pushTrailInterpolated(nx, ny);
     _engine.velocityField.addForce(nx, ny, vx * 22.0, vy * 22.0, aspect: as);
   }
 
   void _onPanEnd(DragEndDetails d) {
     if (_size == Size.zero) return;
-    _engine.setTouching(false); // triggers fast decay
+    _engine.setTouching(false);
     final pv = d.velocity.pixelsPerSecond;
     final as = _size.width / _size.height;
     _engine.velocityField.addForce(

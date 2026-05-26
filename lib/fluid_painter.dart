@@ -9,10 +9,11 @@ class TrailPoint {
 }
 
 class FluidEngine {
-  static const int    _kTrailLen   = 80;
+  static const int    _kTrailLen   = 120;
   static const double _kTrailDecay = 0.10;
 
   Offset _touch      = const Offset(0.5, 0.5);
+  Offset _lastPush   = const Offset(0.5, 0.5); // for interpolation
   Offset _velocity   = Offset.zero;
   double _touchForce = 0.0;
   double _touchBurst = 0.0;
@@ -37,11 +38,29 @@ class FluidEngine {
   void resetTrail(double nx, double ny) {
     for (final p in trail) { p.x = nx; p.y = ny; p.age = 1.0; }
     _trailHead = 0;
+    _lastPush = Offset(nx, ny);
+  }
+
+  // Push with interpolation — fills in 8 sub-steps between last and new point
+  // This guarantees dense trail even during very fast drags
+  void pushTrailInterpolated(double nx, double ny) {
+    const steps = 8;
+    final lx = _lastPush.dx;
+    final ly = _lastPush.dy;
+    for (int s = 1; s <= steps; s++) {
+      final t = s / steps;
+      final ix = lx + (nx - lx) * t;
+      final iy = ly + (ny - ly) * t;
+      trail[_trailHead] = TrailPoint(ix, iy);
+      _trailHead = (_trailHead + 1) % _kTrailLen;
+    }
+    _lastPush = Offset(nx, ny);
   }
 
   void pushTrail(double nx, double ny) {
     trail[_trailHead] = TrailPoint(nx, ny);
     _trailHead = (_trailHead + 1) % _kTrailLen;
+    _lastPush = Offset(nx, ny);
   }
 
   void setTouch(Offset t)      => _touch = t;
@@ -81,80 +100,65 @@ class FluidPainter extends CustomPainter {
   }
 
   void _drawTrail(Canvas canvas, double fw, double fh) {
-    // Collect active points newest-first
-    final pts = <TrailPoint>[];
     for (int i = 0; i < FluidEngine._kTrailLen; i++) {
       final idx = (engine._trailHead - 1 - i + FluidEngine._kTrailLen)
           % FluidEngine._kTrailLen;
       final p = engine.trail[idx];
-      if (p.age >= 0.97) break;
-      pts.add(p);
+      if (p.age >= 0.97) continue;
+
+      final t  = p.age.clamp(0.0, 1.0);
+      final op = pow(1.0 - t, 2.0) as double;
+      if (op < 0.01) continue;
+
+      final cx = p.x * fw;
+      final cy = p.y * fh;
+
+      // Outer aura — large soft blob
+      final auraR = fh * 0.20 * op;
+      canvas.drawCircle(Offset(cx, cy), auraR,
+        Paint()
+          ..blendMode = BlendMode.screen
+          ..shader    = ui.Gradient.radial(
+            Offset(cx, cy), auraR,
+            [
+              Color.fromARGB((op * 55).clamp(0,255).toInt(),  90, 10, 200),
+              Color.fromARGB((op * 15).clamp(0,255).toInt(),  60,  5, 150),
+              const Color(0x00000000),
+            ],
+            [0.0, 0.5, 1.0],
+          ),
+      );
+
+      // Mid glow
+      final midR = fh * 0.10 * op;
+      canvas.drawCircle(Offset(cx, cy), midR,
+        Paint()
+          ..blendMode = BlendMode.screen
+          ..shader    = ui.Gradient.radial(
+            Offset(cx, cy), midR,
+            [
+              Color.fromARGB((op * 170).clamp(0,255).toInt(), 175, 55, 255),
+              Color.fromARGB((op * 50).clamp(0,255).toInt(),  110, 20, 220),
+              const Color(0x00000000),
+            ],
+            [0.0, 0.6, 1.0],
+          ),
+      );
+
+      // Bright core
+      final coreR = fh * 0.038 * op;
+      canvas.drawCircle(Offset(cx, cy), coreR,
+        Paint()
+          ..blendMode = BlendMode.screen
+          ..shader    = ui.Gradient.radial(
+            Offset(cx, cy), coreR,
+            [
+              Color.fromARGB((op * 230).clamp(0,255).toInt(), 240, 190, 255),
+              const Color(0x00000000),
+            ],
+          ),
+      );
     }
-    if (pts.length < 2) return;
-
-    // Build ONE smooth path using midpoint quadratic beziers.
-    // Midpoint method NEVER overshoots — mathematically guaranteed smooth.
-    // pts[0] = newest (finger tip), pts.last = oldest (tail)
-    final path = Path();
-    // Start from newest point
-    path.moveTo(pts[0].x * fw, pts[0].y * fh);
-    for (int i = 0; i < pts.length - 1; i++) {
-      final curr = pts[i];
-      final next = pts[i + 1];
-      // Control point = current, end point = midpoint between current and next
-      final mx = (curr.x + next.x) * 0.5 * fw;
-      final my = (curr.y + next.y) * 0.5 * fh;
-      path.quadraticBezierTo(curr.x * fw, curr.y * fh, mx, my);
-    }
-    // End at last point
-    path.lineTo(pts.last.x * fw, pts.last.y * fh);
-
-    // Gradient: bright at finger (newest=pts[0]), transparent at tail (oldest=pts.last)
-    final p0 = Offset(pts.first.x * fw, pts.first.y * fh);
-    final p1 = Offset(pts.last.x  * fw, pts.last.y  * fh);
-
-    // Overall opacity driven by newest point's age
-    final op = pow(1.0 - pts.first.age.clamp(0.0, 1.0), 1.5) as double;
-    if (op < 0.01) return;
-
-    // ── Pass 1: Wide soft aura ────────────────────────────────────────────────
-    canvas.drawPath(path, Paint()
-      ..blendMode  = BlendMode.screen
-      ..strokeWidth = fh * 0.30      // very thick — fat plasma blob
-      ..strokeCap  = StrokeCap.round
-      ..strokeJoin = StrokeJoin.round
-      ..style      = PaintingStyle.stroke
-      ..shader     = ui.Gradient.linear(p0, p1, [
-          Color.fromARGB((op * 55).clamp(0,255).toInt(),  80, 10, 200),
-          const Color(0x00000000),
-        ])
-    );
-
-    // ── Pass 2: Mid violet glow ───────────────────────────────────────────────
-    canvas.drawPath(path, Paint()
-      ..blendMode  = BlendMode.screen
-      ..strokeWidth = fh * 0.13
-      ..strokeCap  = StrokeCap.round
-      ..strokeJoin = StrokeJoin.round
-      ..style      = PaintingStyle.stroke
-      ..shader     = ui.Gradient.linear(p0, p1, [
-          Color.fromARGB((op * 200).clamp(0,255).toInt(), 180, 60, 255),
-          const Color(0x00000000),
-        ])
-    );
-
-    // ── Pass 3: Bright white-violet core ─────────────────────────────────────
-    canvas.drawPath(path, Paint()
-      ..blendMode  = BlendMode.screen
-      ..strokeWidth = fh * 0.05
-      ..strokeCap  = StrokeCap.round
-      ..strokeJoin = StrokeJoin.round
-      ..style      = PaintingStyle.stroke
-      ..shader     = ui.Gradient.linear(p0, p1, [
-          Color.fromARGB((op * 240).clamp(0,255).toInt(), 240, 195, 255),
-          const Color(0x00000000),
-        ])
-    );
   }
 
   void _drawFinger(Canvas canvas, double fw, double fh) {
@@ -164,7 +168,7 @@ class FluidPainter extends CustomPainter {
     final fx = engine.touch.dx * fw;
     final fy = engine.touch.dy * fh;
 
-    // ── Large outer plasma aura ───────────────────────────────────────────────
+    // Large outer plasma aura
     final bigR = fh * 0.30 * tf;
     canvas.drawCircle(Offset(fx, fy), bigR,
       Paint()
@@ -180,7 +184,7 @@ class FluidPainter extends CustomPainter {
         ),
     );
 
-    // ── Mid violet glow ───────────────────────────────────────────────────────
+    // Mid violet
     final midR = fh * 0.13 * tf;
     canvas.drawCircle(Offset(fx, fy), midR,
       Paint()
@@ -196,7 +200,7 @@ class FluidPainter extends CustomPainter {
         ),
     );
 
-    // ── Hot core ──────────────────────────────────────────────────────────────
+    // Hot core
     final coreR = fh * 0.04 * tf;
     canvas.drawCircle(Offset(fx, fy), coreR,
       Paint()
@@ -210,7 +214,7 @@ class FluidPainter extends CustomPainter {
         ),
     );
 
-    // ── Velocity streak ───────────────────────────────────────────────────────
+    // Velocity streak
     final vel    = engine.velocity;
     final velMag = sqrt(vel.dx * vel.dx + vel.dy * vel.dy);
     if (velMag > 0.0005) {
@@ -236,7 +240,7 @@ class FluidPainter extends CustomPainter {
       );
     }
 
-    // ── Touch burst ───────────────────────────────────────────────────────────
+    // Touch burst
     final tb = engine.touchBurst;
     if (tb > 0.02) {
       final br = fh * 0.20 * tb;
