@@ -11,7 +11,7 @@ class TrailPoint {
 
 class FluidEngine {
   static const int    _kTrailLen   = 24;
-  static const double _kTrailDecay = 0.055; // slower = longer linger
+  static const double _kTrailDecay = 0.055;
 
   ui.Image? _bufA;
   ui.Image? _bufB;
@@ -78,16 +78,13 @@ class FluidEngine {
     final canvas   = Canvas(recorder,
         Rect.fromLTWH(0, 0, w.toDouble(), h.toDouble()));
 
-    // Step 1: advect previous frame forward
     _drawAdvected(canvas, src, w, h);
 
-    // Step 2: gentle decay toward black ~2s half-life at 60fps
     canvas.drawRect(
       Rect.fromLTWH(0, 0, w.toDouble(), h.toDouble()),
       Paint()..color = const Color(0x08000000),
     );
 
-    // Step 3: inject new ink
     _injectInk(canvas, w, h);
 
     final picture = recorder.endRecording();
@@ -155,69 +152,68 @@ class FluidEngine {
     final fw = w.toDouble();
     final fh = h.toDouble();
 
-    // Each trail point = soft glowing circle with MaskFilter.blur
-    // This eliminates ALL pixelation — no drawLine with BlendMode.plus
     for (int i = 0; i < _kTrailLen; i++) {
       final p = trail[i];
       if (p.age >= 1.0) continue;
 
-      // Quadratic ease-out: old points fade fast, new ones stay bright
       final ageCurved = p.age * p.age;
       final op = (1.0 - ageCurved).clamp(0.0, 1.0);
-
-      // Smooth size decrease with age
-      final r = fh * mix(0.11, 0.022, p.age);
-
+      final r  = fh * mix(0.11, 0.022, p.age);
       final px = p.x * fw;
       final py = p.y * fh;
 
-      // Layer 1: wide soft aura
+      // NO MaskFilter.blur, NO BlendMode.plus anywhere
+      // Soft edge comes purely from the radial gradient stopping at 0x00
+
+      // Outer aura
       canvas.drawCircle(
         Offset(px, py),
-        r * 2.0,
+        r * 2.4,
         Paint()
-          ..blendMode  = BlendMode.plus
-          ..maskFilter = MaskFilter.blur(BlurStyle.normal, r * 0.9)
-          ..shader     = ui.Gradient.radial(
-            Offset(px, py), r * 2.0,
+          ..blendMode = BlendMode.srcOver
+          ..shader    = ui.Gradient.radial(
+            Offset(px, py), r * 2.4,
             [
-              Color.fromARGB((op * 30).clamp(0, 255).toInt(), 110, 25, 230),
+              Color.fromARGB((op * 28).clamp(0, 255).toInt(),  90, 15, 200),
+              Color.fromARGB((op * 10).clamp(0, 255).toInt(),  60, 10, 160),
               const Color(0x00000000),
             ],
+            [0.0, 0.5, 1.0],
           ),
       );
 
-      // Layer 2: main glow — the blur kills all pixelation at edges
+      // Main glow body
       canvas.drawCircle(
         Offset(px, py),
-        r,
+        r * 1.2,
         Paint()
-          ..blendMode  = BlendMode.plus
-          ..maskFilter = MaskFilter.blur(BlurStyle.normal, r * 0.50)
-          ..shader     = ui.Gradient.radial(
-            Offset(px, py), r,
+          ..blendMode = BlendMode.srcOver
+          ..shader    = ui.Gradient.radial(
+            Offset(px, py), r * 1.2,
             [
-              Color.fromARGB((op * 125).clamp(0, 255).toInt(), 185, 65, 255),
-              Color.fromARGB((op * 65).clamp(0, 255).toInt(),  115, 20, 230),
+              Color.fromARGB((op * 160).clamp(0, 255).toInt(), 180, 60, 255),
+              Color.fromARGB((op * 80).clamp(0, 255).toInt(),  120, 20, 220),
+              Color.fromARGB((op * 20).clamp(0, 255).toInt(),   80, 10, 180),
               const Color(0x00000000),
             ],
-            [0.0, 0.55, 1.0],
+            [0.0, 0.4, 0.75, 1.0],
           ),
       );
 
-      // Layer 3: bright core spine
+      // Bright core
       canvas.drawCircle(
         Offset(px, py),
-        r * 0.32,
+        r * 0.38,
         Paint()
-          ..blendMode  = BlendMode.plus
-          ..maskFilter = MaskFilter.blur(BlurStyle.normal, r * 0.22)
-          ..shader     = ui.Gradient.radial(
-            Offset(px, py), r * 0.32,
+          ..blendMode = BlendMode.srcOver
+          ..shader    = ui.Gradient.radial(
+            Offset(px, py), r * 0.38,
             [
-              Color.fromARGB((op * 210).clamp(0, 255).toInt(), 235, 185, 255),
+              Color.fromARGB((op * 220).clamp(0, 255).toInt(), 235, 190, 255),
+              Color.fromARGB((op * 80).clamp(0, 255).toInt(),  180,  60, 255),
               const Color(0x00000000),
             ],
+            [0.0, 0.6, 1.0],
           ),
       );
     }
@@ -228,57 +224,56 @@ class FluidEngine {
       final fy = _touch.dy * fh;
       final r  = fh * 0.088 * _touchForce;
 
-      // Wide outer aura
       canvas.drawCircle(
         Offset(fx, fy),
-        r * 2.6,
+        r * 3.0,
         Paint()
-          ..blendMode  = BlendMode.plus
-          ..maskFilter = MaskFilter.blur(BlurStyle.normal, r * 1.1)
-          ..shader     = ui.Gradient.radial(
-            Offset(fx, fy), r * 2.6,
+          ..blendMode = BlendMode.srcOver
+          ..shader    = ui.Gradient.radial(
+            Offset(fx, fy), r * 3.0,
             [
-              Color.fromARGB((_touchForce * 28).clamp(0, 255).toInt(), 125, 35, 245),
-              const Color(0x00000000),
-            ],
-          ),
-      );
-
-      // Main body
-      canvas.drawCircle(
-        Offset(fx, fy),
-        r,
-        Paint()
-          ..blendMode  = BlendMode.plus
-          ..maskFilter = MaskFilter.blur(BlurStyle.normal, r * 0.38)
-          ..shader     = ui.Gradient.radial(
-            Offset(fx, fy), r,
-            [
-              Color.fromARGB((_touchForce * 175).clamp(0, 255).toInt(), 195, 85, 255),
-              Color.fromARGB((_touchForce * 75).clamp(0, 255).toInt(),  105, 18, 215),
+              Color.fromARGB((_touchForce * 25).clamp(0, 255).toInt(), 110, 25, 230),
+              Color.fromARGB((_touchForce *  8).clamp(0, 255).toInt(),  80, 15, 180),
               const Color(0x00000000),
             ],
             [0.0, 0.5, 1.0],
           ),
       );
 
-      // Brilliant white-violet core
       canvas.drawCircle(
         Offset(fx, fy),
-        r * 0.26,
+        r * 1.1,
         Paint()
-          ..blendMode  = BlendMode.plus
-          ..maskFilter = MaskFilter.blur(BlurStyle.normal, r * 0.16)
-          ..shader     = ui.Gradient.radial(
-            Offset(fx, fy), r * 0.26,
+          ..blendMode = BlendMode.srcOver
+          ..shader    = ui.Gradient.radial(
+            Offset(fx, fy), r * 1.1,
             [
-              Color.fromARGB((_touchForce * 245).clamp(0, 255).toInt(), 248, 205, 255),
+              Color.fromARGB((_touchForce * 180).clamp(0, 255).toInt(), 195, 85, 255),
+              Color.fromARGB((_touchForce * 100).clamp(0, 255).toInt(), 130, 30, 230),
+              Color.fromARGB((_touchForce *  25).clamp(0, 255).toInt(),  80, 10, 190),
               const Color(0x00000000),
             ],
+            [0.0, 0.45, 0.75, 1.0],
           ),
       );
 
-      // ── Velocity streak ──────────────────────────────────────────────────
+      canvas.drawCircle(
+        Offset(fx, fy),
+        r * 0.30,
+        Paint()
+          ..blendMode = BlendMode.srcOver
+          ..shader    = ui.Gradient.radial(
+            Offset(fx, fy), r * 0.30,
+            [
+              Color.fromARGB((_touchForce * 245).clamp(0, 255).toInt(), 250, 210, 255),
+              Color.fromARGB((_touchForce * 120).clamp(0, 255).toInt(), 200,  90, 255),
+              const Color(0x00000000),
+            ],
+            [0.0, 0.55, 1.0],
+          ),
+      );
+
+      // Velocity streak
       final vel    = _velocity;
       final velMag = sqrt(vel.dx * vel.dx + vel.dy * vel.dy);
       if (velMag > 0.0006) {
@@ -290,16 +285,15 @@ class FluidEngine {
           Offset(fx, fy),
           Offset(fx + nx * streakLen, fy + ny * streakLen),
           Paint()
-            ..blendMode  = BlendMode.plus
-            ..strokeWidth = r * 1.6
+            ..blendMode  = BlendMode.srcOver
+            ..strokeWidth = r * 1.8
             ..strokeCap  = StrokeCap.round
             ..style      = PaintingStyle.stroke
-            ..maskFilter = MaskFilter.blur(BlurStyle.normal, r * 0.65)
             ..shader     = ui.Gradient.linear(
               Offset(fx, fy),
               Offset(fx + nx * streakLen, fy + ny * streakLen),
               [
-                Color.fromARGB((_touchForce * 50).clamp(0, 255).toInt(), 145, 45, 255),
+                Color.fromARGB((_touchForce * 45).clamp(0, 255).toInt(), 150, 50, 255),
                 const Color(0x00000000),
               ],
             ),
@@ -309,16 +303,15 @@ class FluidEngine {
           Offset(fx, fy),
           Offset(fx + nx * streakLen, fy + ny * streakLen),
           Paint()
-            ..blendMode  = BlendMode.plus
+            ..blendMode  = BlendMode.srcOver
             ..strokeWidth = r * 0.45
             ..strokeCap  = StrokeCap.round
             ..style      = PaintingStyle.stroke
-            ..maskFilter = MaskFilter.blur(BlurStyle.normal, r * 0.18)
             ..shader     = ui.Gradient.linear(
               Offset(fx, fy),
               Offset(fx + nx * streakLen, fy + ny * streakLen),
               [
-                Color.fromARGB((_touchForce * 205).clamp(0, 255).toInt(), 235, 185, 255),
+                Color.fromARGB((_touchForce * 200).clamp(0, 255).toInt(), 235, 190, 255),
                 const Color(0x00000000),
               ],
             ),
@@ -326,7 +319,7 @@ class FluidEngine {
       }
     }
 
-    // ── Touch burst ──────────────────────────────────────────────────────────
+    // Touch burst
     if (_touchBurst > 0.02) {
       final fx = _touch.dx * fw;
       final fy = _touch.dy * fh;
@@ -335,14 +328,13 @@ class FluidEngine {
         Offset(fx, fy),
         r,
         Paint()
-          ..blendMode  = BlendMode.plus
-          ..maskFilter = MaskFilter.blur(BlurStyle.normal, r * 0.45)
-          ..shader     = ui.Gradient.radial(
+          ..blendMode = BlendMode.srcOver
+          ..shader    = ui.Gradient.radial(
             Offset(fx, fy), r,
             [
               Color.fromARGB(
-                  (_touchBurst * _touchBurst * 85).clamp(0, 255).toInt(),
-                  205, 155, 255),
+                  (_touchBurst * _touchBurst * 80).clamp(0, 255).toInt(),
+                  210, 160, 255),
               const Color(0x00000000),
             ],
           ),
