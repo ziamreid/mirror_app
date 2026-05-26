@@ -139,7 +139,7 @@ class _FluidScreenState extends State<FluidScreen>
     final breathCycle = (t % 8.0) / 8.0;
     _breath = (sin(breathCycle * 2 * pi - pi / 2) + 1.0) / 2.0;
 
-    _touchForce = (_touchForce - dt * 1.5).clamp(0.0, 1.0);
+    _touchForce = (_touchForce - dt * 0.8).clamp(0.0, 1.0);
     _velocity   = _velocity * 0.88;
 
     // Dispatch physics to isolate only if previous one finished
@@ -196,6 +196,36 @@ class _FluidScreenState extends State<FluidScreen>
     });
   }
 
+  // Burst on finger landing — fluid parts immediately on touch
+  void _onPanStart(DragStartDetails details) {
+    if (_size == Size.zero) return;
+    final nx     = details.localPosition.dx / _size.width;
+    final ny     = details.localPosition.dy / _size.height;
+    final aspect = _size.width / _size.height;
+    // Radial burst — inject force outward in 4 directions
+    _velocityField.addForce(nx, ny,  0.08,  0.0,  aspect: aspect);
+    _velocityField.addForce(nx, ny, -0.08,  0.0,  aspect: aspect);
+    _velocityField.addForce(nx, ny,  0.0,   0.08, aspect: aspect);
+    _velocityField.addForce(nx, ny,  0.0,  -0.08, aspect: aspect);
+    _touch      = Offset(nx, ny);
+    _touchForce = 1.0;
+  }
+
+  // Natural lift-off — inject final velocity on release
+  void _onPanEnd(DragEndDetails details) {
+    final vel = details.velocity.pixelsPerSecond;
+    if (_size == Size.zero) return;
+    final nx     = _touch.dx;
+    final ny     = _touch.dy;
+    final aspect = _size.width / _size.height;
+    _velocityField.addForce(
+      nx, ny,
+      vel.dx * 0.0008,
+      vel.dy * 0.0008,
+      aspect: aspect,
+    );
+  }
+
   void _onPanUpdate(DragUpdateDetails details) {
     if (_size == Size.zero) return;
     final nx     = details.localPosition.dx / _size.width;
@@ -229,7 +259,9 @@ class _FluidScreenState extends State<FluidScreen>
     return Scaffold(
       backgroundColor: Colors.black,
       body: GestureDetector(
+        onPanStart:  _onPanStart,
         onPanUpdate: _onPanUpdate,
+        onPanEnd:    _onPanEnd,
         child: _errorMessage != null
             ? Center(
                 child: Padding(
