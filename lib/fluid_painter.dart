@@ -9,7 +9,7 @@ class TrailPoint {
 }
 
 class FluidEngine {
-  static const int    _kTrailLen   = 120;
+  static const int    _kTrailLen   = 60;
   static const double _kTrailDecay = 0.10;
 
   Offset _touch      = const Offset(0.5, 0.5);
@@ -44,13 +44,23 @@ class FluidEngine {
   // Push with interpolation — fills in 8 sub-steps between last and new point
   // This guarantees dense trail even during very fast drags
   void pushTrailInterpolated(double nx, double ny) {
-    const steps = 8;
     final lx = _lastPush.dx;
     final ly = _lastPush.dy;
+    final dx = nx - lx;
+    final dy = ny - ly;
+    final dist = dx * dx + dy * dy;
+    // Min distance: 0.008 normalized units (~3px on iPhone)
+    // Skip if too close — avoids redundant overlapping circles
+    if (dist < 0.008 * 0.008) {
+      _lastPush = Offset(nx, ny);
+      return;
+    }
+    // Only interpolate if gap is large enough to need it
+    final steps = dist > 0.02 * 0.02 ? 3 : 1;
     for (int s = 1; s <= steps; s++) {
       final t = s / steps;
-      final ix = lx + (nx - lx) * t;
-      final iy = ly + (ny - ly) * t;
+      final ix = lx + dx * t;
+      final iy = ly + dy * t;
       trail[_trailHead] = TrailPoint(ix, iy);
       _trailHead = (_trailHead + 1) % _kTrailLen;
     }
