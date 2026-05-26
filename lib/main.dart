@@ -6,7 +6,10 @@ import 'package:flutter/scheduler.dart';
 import 'fluid_painter.dart';
 import 'velocity_field.dart';
 
-void main() => runApp(const MyApp());
+void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  runApp(const MyApp());
+}
 
 Float32List _physicsStep(List<dynamic> args) {
   final Float32List velX = args[0];
@@ -27,7 +30,9 @@ class MyApp extends StatelessWidget {
   const MyApp({super.key});
   @override
   Widget build(BuildContext context) => const MaterialApp(
-      debugShowCheckedModeBanner: false, home: FluidScreen());
+        debugShowCheckedModeBanner: false,
+        home: FluidScreen(),
+      );
 }
 
 class FluidScreen extends StatefulWidget {
@@ -42,7 +47,7 @@ class _FluidScreenState extends State<FluidScreen>
   double _prevT = 0.0;
   Size   _size  = Size.zero;
 
-  final FluidEngine _engine  = FluidEngine();
+  final FluidEngine _engine = FluidEngine();
   final _repaint = ValueNotifier<int>(0);
   bool _physicsRunning = false;
 
@@ -55,8 +60,8 @@ class _FluidScreenState extends State<FluidScreen>
 
   void _onTick(Duration elapsed) {
     if (_size == Size.zero) return;
-    final t  = elapsed.inMilliseconds / 1000.0;
-    final dt = (t - _prevT).clamp(0.0, 0.05);
+    final t  = elapsed.inMicroseconds / 1000000.0;
+    final dt = (t - _prevT).clamp(0.0, 0.032);
     _prevT   = t;
     _engine.tick(dt);
     if (!_physicsRunning) _dispatchPhysics(dt);
@@ -89,7 +94,6 @@ class _FluidScreenState extends State<FluidScreen>
     _engine.setTouchForce(1.0);
     _engine.setTouchBurst(1.0);
     _engine.setVelocity(Offset.zero);
-    _engine.pushTrail(nx, ny);
     for (final dir in [
       const Offset( 0.10,  0.00),
       const Offset(-0.10,  0.00),
@@ -114,16 +118,17 @@ class _FluidScreenState extends State<FluidScreen>
       prev.dy * 0.75 + vy * 0.25,
     ));
     _engine.setTouchForce(1.0);
-    // interpolated push — fills gaps during fast drag
-    _engine.pushTrailInterpolated(nx, ny);
+    _engine.pushTrailDense(nx, ny);
     _engine.velocityField.addForce(nx, ny, vx * 22.0, vy * 22.0, aspect: as);
   }
 
   void _onPanEnd(DragEndDetails d) {
     if (_size == Size.zero) return;
-    _engine.setTouching(false);
     final pv = d.velocity.pixelsPerSecond;
     final as = _size.width / _size.height;
+    _engine.setTouching(false);
+    // Option C: assign per-point drift (comet head + turbulent tail)
+    _engine.assignDriftOnRelease(pv, _size);
     _engine.velocityField.addForce(
       _engine.touch.dx, _engine.touch.dy,
       pv.dx * 0.0008, pv.dy * 0.0008, aspect: as,

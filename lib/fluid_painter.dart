@@ -3,17 +3,24 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'velocity_field.dart';
 
+final _rng = Random();
+
 class TrailPoint {
   double x, y, age;
+  // Per-point drift assigned on release — gives each point unique movement
+  double driftX = 0.0;
+  double driftY = 0.0;
+
   TrailPoint(this.x, this.y) : age = 0.0;
 }
 
 class FluidEngine {
-  static const int    _kTrailLen   = 60;
-  static const double _kTrailDecay = 0.10;
+  static const int    _kTrailLen   = 200;
+  static const double _kTrailDecay = 0.028;
+  static const double _kMinDist    = 0.004;
 
   Offset _touch      = const Offset(0.5, 0.5);
-  Offset _lastPush   = const Offset(0.5, 0.5); // for interpolation
+  Offset _lastPush   = const Offset(-1, -1);
   Offset _velocity   = Offset.zero;
   double _touchForce = 0.0;
   double _touchBurst = 0.0;
@@ -29,49 +36,102 @@ class FluidEngine {
     _touchForce = (_touchForce - dt * 2.0).clamp(0.0, 1.0);
     _touchBurst = (_touchBurst - dt * 4.0).clamp(0.0, 1.0);
     _velocity   = _velocity * 0.88;
-    final decayRate = _touching ? _kTrailDecay : _kTrailDecay * 4.0;
+
+    if (!_touching) {
+      // Move each trail point by its own assigned drift
+      for (final p in trail) {
+        if (p.age < 0.98) {
+          p.x = (p.x + p.driftX * dt).clamp(0.0, 1.0);
+          p.y = (p.y + p.driftY * dt).clamp(0.0, 1.0);
+          // Friction — drift decays over time
+          p.driftX *= 0.90;
+          p.driftY *= 0.90;
+        }
+      }
+    }
+
+    final decayRate = _touching ? _kTrailDecay : _kTrailDecay * 6.0;
     for (final p in trail) {
       p.age = (p.age + dt * decayRate).clamp(0.0, 1.0);
     }
   }
 
   void resetTrail(double nx, double ny) {
-    for (final p in trail) { p.x = nx; p.y = ny; p.age = 1.0; }
+    for (final p in trail) {
+      p.x = nx; p.y = ny; p.age = 1.0;
+      p.driftX = 0.0; p.driftY = 0.0;
+    }
     _trailHead = 0;
-    _lastPush = Offset(nx, ny);
+    _lastPush  = Offset(nx, ny);
   }
 
-  // Push with interpolation — fills in 8 sub-steps between last and new point
-  // This guarantees dense trail even during very fast drags
-  void pushTrailInterpolated(double nx, double ny) {
+  void pushTrailDense(double nx, double ny) {
     final lx = _lastPush.dx;
     final ly = _lastPush.dy;
-    final dx = nx - lx;
-    final dy = ny - ly;
-    final dist = dx * dx + dy * dy;
-    // Min distance: 0.008 normalized units (~3px on iPhone)
-    // Skip if too close — avoids redundant overlapping circles
-    if (dist < 0.008 * 0.008) {
+
+    if (lx < 0) {
+      _writePt(nx, ny);
       _lastPush = Offset(nx, ny);
       return;
     }
-    // Only interpolate if gap is large enough to need it
-    final steps = dist > 0.02 * 0.02 ? 3 : 1;
+
+    final dx   = nx - lx;
+    final dy   = ny - ly;
+    final dist = sqrt(dx * dx + dy * dy);
+    if (dist < _kMinDist) return;
+
+    final steps = (dist / _kMinDist).ceil().clamp(1, 20);
     for (int s = 1; s <= steps; s++) {
       final t = s / steps;
-      final ix = lx + dx * t;
-      final iy = ly + dy * t;
-      trail[_trailHead] = TrailPoint(ix, iy);
-      _trailHead = (_trailHead + 1) % _kTrailLen;
+      _writePt(lx + dx * t, ly + dy * t);
     }
     _lastPush = Offset(nx, ny);
   }
 
-  void pushTrail(double nx, double ny) {
-    trail[_trailHead] = TrailPoint(nx, ny);
+  void _writePt(double x, double y) {
+    trail[_trailHead] = TrailPoint(x, y);
     _trailHead = (_trailHead + 1) % _kTrailLen;
-    _lastPush = Offset(nx, ny);
   }
+
+  /// Called on release — assigns per-point drift implementing Option C:
+  /// - Newer points (low index from head) get strong forward momentum (comet head)
+  /// - Older points get turbulent outward scatter (tail dissolves)
+  void assignDriftOnRelease(Offset pixelVelocity, Size screenSize) {
+    // Normalize fling direction
+    final flingX = pixelVelocity.dx / screenSize.width;
+    final flingY = pixelVelocity.dy / screenSize.height;
+    final flingMag = sqrt(flingX * flingX + flingY * flingY);
+    final hasFling = flingMag > 0.05;
+    final normX = hasFling ? flingX / flingMag : 0.0;
+    final normY = hasFling ? flingY / flingMag : 0.0;
+
+    for (int i = 0; i < _kTrailLen; i++) {
+      final idx = (_trailHead - 1 - i + _kTrailLen) % _kTrailLen;
+      final p = trail[idx];
+      if (p.age >= 0.98) continue;
+
+      // i=0 → newest (head), i=_kTrailLen-1 → oldest (tail)
+      final normalizedAge = i / _kTrailLen; // 0.0=head, 1.0=tail
+
+      // === OPTION A: Comet head — forward momentum, stronger for newer points ===
+      final forwardStrength = (1.0 - normalizedAge) * (hasFling ? flingMag * 0.5 : 0.0);
+      final forwardX = normX * forwardStrength;
+      final forwardY = normY * forwardStrength;
+
+      // === OPTION B: Turbulent scatter — stronger for older points ===
+      final scatterStrength = normalizedAge * 0.08;
+      final angle = _rng.nextDouble() * 2 * pi;
+      final scatterX = cos(angle) * scatterStrength;
+      final scatterY = sin(angle) * scatterStrength;
+
+      // === OPTION C: Blend both ===
+      p.driftX = forwardX + scatterX;
+      p.driftY = forwardY + scatterY;
+    }
+  }
+
+  // expose for drift assignment loop
+  int get trailHead => _trailHead;
 
   void setTouch(Offset t)      => _touch = t;
   void setVelocity(Offset v)   => _velocity = v;
@@ -106,167 +166,75 @@ class FluidPainter extends CustomPainter {
     );
 
     _drawTrail(canvas, fw, fh);
-    _drawFinger(canvas, fw, fh);
   }
 
   void _drawTrail(Canvas canvas, double fw, double fh) {
-    for (int i = 0; i < FluidEngine._kTrailLen; i++) {
-      final idx = (engine._trailHead - 1 - i + FluidEngine._kTrailLen)
+    const double auraFrac = 0.28;
+    const double midFrac  = 0.13;
+    const double coreFrac = 0.045;
+
+    final auraR = fh * auraFrac;
+    final midR  = fh * midFrac;
+    final coreR = fh * coreFrac;
+
+    for (int i = FluidEngine._kTrailLen - 1; i >= 0; i--) {
+      final idx = (engine.trailHead - 1 - i + FluidEngine._kTrailLen)
           % FluidEngine._kTrailLen;
       final p = engine.trail[idx];
-      if (p.age >= 0.97) continue;
+      if (p.age >= 0.98) continue;
 
       final t  = p.age.clamp(0.0, 1.0);
-      final op = pow(1.0 - t, 2.0) as double;
-      if (op < 0.01) continue;
+      final op = pow(1.0 - t, 2.5) as double;
+      if (op < 0.008) continue;
 
       final cx = p.x * fw;
       final cy = p.y * fh;
 
-      // Outer aura — large soft blob
-      final auraR = fh * 0.20 * op;
       canvas.drawCircle(Offset(cx, cy), auraR,
         Paint()
           ..blendMode = BlendMode.screen
           ..shader    = ui.Gradient.radial(
             Offset(cx, cy), auraR,
             [
-              Color.fromARGB((op * 55).clamp(0,255).toInt(),  90, 10, 200),
-              Color.fromARGB((op * 15).clamp(0,255).toInt(),  60,  5, 150),
+              Color.fromARGB(_a(op * 0.28), 80,  5, 200),
+              Color.fromARGB(_a(op * 0.10), 55,  3, 150),
               const Color(0x00000000),
             ],
-            [0.0, 0.5, 1.0],
+            [0.0, 0.55, 1.0],
           ),
       );
 
-      // Mid glow
-      final midR = fh * 0.10 * op;
       canvas.drawCircle(Offset(cx, cy), midR,
         Paint()
           ..blendMode = BlendMode.screen
           ..shader    = ui.Gradient.radial(
             Offset(cx, cy), midR,
             [
-              Color.fromARGB((op * 170).clamp(0,255).toInt(), 175, 55, 255),
-              Color.fromARGB((op * 50).clamp(0,255).toInt(),  110, 20, 220),
+              Color.fromARGB(_a(op * 0.85), 190, 70, 255),
+              Color.fromARGB(_a(op * 0.30), 120, 20, 230),
               const Color(0x00000000),
             ],
-            [0.0, 0.6, 1.0],
+            [0.0, 0.60, 1.0],
           ),
       );
 
-      // Bright core
-      final coreR = fh * 0.038 * op;
       canvas.drawCircle(Offset(cx, cy), coreR,
         Paint()
           ..blendMode = BlendMode.screen
           ..shader    = ui.Gradient.radial(
             Offset(cx, cy), coreR,
             [
-              Color.fromARGB((op * 230).clamp(0,255).toInt(), 240, 190, 255),
+              Color.fromARGB(_a(op * 1.0),  248, 210, 255),
+              Color.fromARGB(_a(op * 0.50), 210, 130, 255),
               const Color(0x00000000),
             ],
+            [0.0, 0.50, 1.0],
           ),
       );
     }
   }
 
-  void _drawFinger(Canvas canvas, double fw, double fh) {
-    final tf = engine.touchForce;
-    if (tf < 0.01) return;
-
-    final fx = engine.touch.dx * fw;
-    final fy = engine.touch.dy * fh;
-
-    // Large outer plasma aura
-    final bigR = fh * 0.30 * tf;
-    canvas.drawCircle(Offset(fx, fy), bigR,
-      Paint()
-        ..blendMode = BlendMode.screen
-        ..shader    = ui.Gradient.radial(
-          Offset(fx, fy), bigR,
-          [
-            Color.fromARGB((tf * 70).clamp(0,255).toInt(),  90, 10, 210),
-            Color.fromARGB((tf * 25).clamp(0,255).toInt(),  55,  5, 150),
-            const Color(0x00000000),
-          ],
-          [0.0, 0.5, 1.0],
-        ),
-    );
-
-    // Mid violet
-    final midR = fh * 0.13 * tf;
-    canvas.drawCircle(Offset(fx, fy), midR,
-      Paint()
-        ..blendMode = BlendMode.screen
-        ..shader    = ui.Gradient.radial(
-          Offset(fx, fy), midR,
-          [
-            Color.fromARGB((tf * 220).clamp(0,255).toInt(), 190, 70, 255),
-            Color.fromARGB((tf * 70).clamp(0,255).toInt(),  120, 20, 230),
-            const Color(0x00000000),
-          ],
-          [0.0, 0.55, 1.0],
-        ),
-    );
-
-    // Hot core
-    final coreR = fh * 0.04 * tf;
-    canvas.drawCircle(Offset(fx, fy), coreR,
-      Paint()
-        ..blendMode = BlendMode.screen
-        ..shader    = ui.Gradient.radial(
-          Offset(fx, fy), coreR,
-          [
-            Color.fromARGB((tf * 255).clamp(0,255).toInt(), 252, 215, 255),
-            const Color(0x00000000),
-          ],
-        ),
-    );
-
-    // Velocity streak
-    final vel    = engine.velocity;
-    final velMag = sqrt(vel.dx * vel.dx + vel.dy * vel.dy);
-    if (velMag > 0.0005) {
-      final nx        = vel.dx / velMag;
-      final ny        = vel.dy / velMag;
-      final streakLen = (velMag * fw * 6.0).clamp(0.0, fh * 0.22);
-      canvas.drawLine(
-        Offset(fx, fy),
-        Offset(fx + nx * streakLen, fy + ny * streakLen),
-        Paint()
-          ..blendMode  = BlendMode.screen
-          ..strokeWidth = midR * 1.4
-          ..strokeCap  = StrokeCap.round
-          ..style      = PaintingStyle.stroke
-          ..shader     = ui.Gradient.linear(
-            Offset(fx, fy),
-            Offset(fx + nx * streakLen, fy + ny * streakLen),
-            [
-              Color.fromARGB((tf * 50).clamp(0,255).toInt(), 150, 40, 255),
-              const Color(0x00000000),
-            ],
-          ),
-      );
-    }
-
-    // Touch burst
-    final tb = engine.touchBurst;
-    if (tb > 0.02) {
-      final br = fh * 0.20 * tb;
-      canvas.drawCircle(Offset(fx, fy), br,
-        Paint()
-          ..blendMode = BlendMode.screen
-          ..shader    = ui.Gradient.radial(
-            Offset(fx, fy), br,
-            [
-              Color.fromARGB((tb * tb * 90).clamp(0,255).toInt(), 210, 160, 255),
-              const Color(0x00000000),
-            ],
-          ),
-      );
-    }
-  }
+  static int _a(double v) => (v * 255).clamp(0, 255).toInt();
 
   @override
   bool shouldRepaint(FluidPainter old) => true;
