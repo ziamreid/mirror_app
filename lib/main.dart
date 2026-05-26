@@ -5,19 +5,21 @@ import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:flutter/services.dart';
 import 'velocity_field.dart';
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  // Request highest available refresh rate from the OS (120Hz on ProMotion)
+  // Flutter will negotiate the actual rate with the display hardware.
+  SystemChrome.setPreferredOrientations([
+    DeviceOrientation.portraitUp,
+    DeviceOrientation.portraitDown,
+  ]);
   runApp(const MyApp());
 }
 
 // ─── Isolate function ─────────────────────────────────────────────────────────
-// Receives: [Float32List velX, Float32List velY, double dt]
-// Returns:  Float32List packed as:
-//   [0    .. 1023] = updated velX
-//   [1024 .. 2047] = updated velY
-//   [2048 .. 3071] = pixel R values as floats (0..255)  velX encoded
-//   [3072 .. 4095] = pixel G values as floats (0..255)  velY encoded
 Float32List _physicsStep(List<dynamic> args) {
   final Float32List velX = args[0] as Float32List;
   final Float32List velY = args[1] as Float32List;
@@ -72,12 +74,10 @@ class _FluidScreenState extends State<FluidScreen>
   double _breath     = 0.5;
   Size   _size       = Size.zero;
 
-  // Touch state — drives smooth gaussian smear in shader (pixel-perfect)
   Offset _touch      = const Offset(0.5, 0.5);
   Offset _velocity   = Offset.zero;
   double _touchForce = 0.0;
 
-  // Gyro — wired in Phase B. Zero placeholder keeps uniform slot filled.
   final Offset _gyro = Offset.zero;
 
   final _velocityField = VelocityField();
@@ -96,6 +96,9 @@ class _FluidScreenState extends State<FluidScreen>
     _loadShader();
     _ticker = createTicker(_onTick);
     _ticker.start();
+
+    // 120Hz ProMotion is unlocked via CADisableMinimumFrameDurationOnPhone
+    // in ios/Runner/Info.plist — no Dart-side code needed.
   }
 
   Future<void> _loadShader() async {
@@ -131,15 +134,14 @@ class _FluidScreenState extends State<FluidScreen>
     final dt = (t - _time).clamp(0.0, 0.05);
     _time    = t;
 
-    // Breath — always runs
     final breathCycle = (t % 8.0) / 8.0;
     _breath = (sin(breathCycle * 2 * pi - pi / 2) + 1.0) / 2.0;
 
-    // Touch force decay — 1.2s to fully decay
+    // Touch force decays over ~1.2 seconds
     _touchForce = (_touchForce - dt * 0.85).clamp(0.0, 1.0);
 
-    // Velocity decay — smooths out between drag events
-    _velocity = _velocity * 0.85;
+    // Velocity decays between drag events
+    _velocity = _velocity * 0.82;
 
     if (!_physicsRunning && dt < 0.033) {
       _dispatchPhysics(dt);
@@ -196,7 +198,6 @@ class _FluidScreenState extends State<FluidScreen>
     final aspect = _size.width / _size.height;
     _touch      = Offset(nx, ny);
     _touchForce = 1.0;
-    // Radial burst into physics grid
     _velocityField.addForce(nx, ny,  0.08,  0.0,  aspect: aspect);
     _velocityField.addForce(nx, ny, -0.08,  0.0,  aspect: aspect);
     _velocityField.addForce(nx, ny,  0.0,   0.08, aspect: aspect);
@@ -215,31 +216,20 @@ class _FluidScreenState extends State<FluidScreen>
     _velocity   = Offset(vx, vy);
     _touchForce = 1.0;
 
-    // Physics grid still gets force for glow trail
-    _velocityField.addForce(
-      nx, ny,
-      vx * 12.0,
-      vy * 12.0,
-      aspect: aspect,
-    );
+    _velocityField.addForce(nx, ny, vx * 12.0, vy * 12.0, aspect: aspect);
   }
 
   void _onPanEnd(DragEndDetails details) {
     if (_size == Size.zero) return;
     final vel    = details.velocity.pixelsPerSecond;
     final aspect = _size.width / _size.height;
-    // Inject final momentum into physics grid for glow trail continuation
     _velocityField.addForce(
       _touch.dx, _touch.dy,
       vel.dx * 0.0008,
       vel.dy * 0.0008,
       aspect: aspect,
     );
-    // Keep velocity for shader smear inertia — decays naturally in _onTick
-    _velocity = Offset(
-      vel.dx * 0.0005,
-      vel.dy * 0.0005,
-    );
+    _velocity = Offset(vel.dx * 0.0005, vel.dy * 0.0005);
   }
 
   @override
