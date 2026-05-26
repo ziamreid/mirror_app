@@ -3,16 +3,14 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'velocity_field.dart';
 
-// ── Trail point ───────────────────────────────────────────────────────────────
 class TrailPoint {
   double x, y, age;
   TrailPoint(this.x, this.y) : age = 0.0;
 }
 
-// ── Engine ────────────────────────────────────────────────────────────────────
 class FluidEngine {
-  static const int    _kTrailLen   = 60;   // more points = smoother tube
-  static const double _kTrailDecay = 0.055; // slightly faster decay so tail disappears cleanly
+  static const int    _kTrailLen   = 60;
+  static const double _kTrailDecay = 0.05;
 
   Offset _touch      = const Offset(0.5, 0.5);
   Offset _velocity   = Offset.zero;
@@ -55,7 +53,6 @@ class FluidEngine {
   double get touchBurst => _touchBurst;
 }
 
-// ── Painter ───────────────────────────────────────────────────────────────────
 class FluidPainter extends CustomPainter {
   final FluidEngine engine;
   final Size        screenSize;
@@ -81,128 +78,96 @@ class FluidPainter extends CustomPainter {
   }
 
   void _drawTrail(Canvas canvas, double fw, double fh) {
-    // Collect active points newest-first
     final pts = <TrailPoint>[];
     for (int i = 0; i < FluidEngine._kTrailLen; i++) {
       final idx = (engine._trailHead - 1 - i + FluidEngine._kTrailLen) % FluidEngine._kTrailLen;
       final p = engine.trail[idx];
-      if (p.age >= 0.98) break;
+      if (p.age >= 0.97) break;
       pts.add(p);
     }
     if (pts.length < 2) return;
 
-    // ── Draw each segment as a circle-pair sandwich inside saveLayer ──────────
-    // saveLayer isolates all blending — no visible layer rings escape to screen.
-    // We draw from OLDEST to NEWEST so newer (brighter) segments paint on top.
-    final screenRect = Rect.fromLTWH(0, 0, fw, fh);
-
-    // ── AURA layer (outermost soft glow) ──────────────────────────────────────
-    canvas.saveLayer(screenRect, Paint()..blendMode = BlendMode.screen);
+    // Draw oldest → newest so newer segments paint on top
     for (int i = pts.length - 2; i >= 0; i--) {
-      _drawSegmentCircle(canvas, pts[i], pts[i + 1], fw, fh,
-        radiusFactor: 2.6,
-        alphaNew: 0.10,
-        alphaOld: 0.0,
-        colorNew: const Color(0xFF5A10C8),
-        colorOld: const Color(0xFF000000),
-      );
-    }
-    canvas.restore();
+      final a = pts[i];
+      final b = pts[i + 1];
 
-    // ── BODY layer (main tube) ────────────────────────────────────────────────
-    canvas.saveLayer(screenRect, Paint()..blendMode = BlendMode.screen);
-    for (int i = pts.length - 2; i >= 0; i--) {
-      _drawSegmentCircle(canvas, pts[i], pts[i + 1], fw, fh,
-        radiusFactor: 1.0,
-        alphaNew: 0.85,
-        alphaOld: 0.0,
-        colorNew: const Color(0xFFB43CFF),
-        colorOld: const Color(0xFF000000),
-      );
-    }
-    canvas.restore();
+      // Use the OLDER point's age to drive everything — the older end controls fade
+      final age = b.age.clamp(0.0, 1.0); // b is older (further from head)
 
-    // ── CORE layer (bright white-violet center) ───────────────────────────────
-    canvas.saveLayer(screenRect, Paint()..blendMode = BlendMode.screen);
-    for (int i = pts.length - 2; i >= 0; i--) {
-      _drawSegmentCircle(canvas, pts[i], pts[i + 1], fw, fh,
-        radiusFactor: 0.38,
-        alphaNew: 1.0,
-        alphaOld: 0.0,
-        colorNew: const Color(0xFFEFD0FF),
-        colorOld: const Color(0xFF000000),
-      );
+      // Cubic: reaches 0 well before age=1, so tail completely vanishes — no ball
+      final op = pow(1.0 - age, 2.5) as double;
+      if (op < 0.006) continue;
+
+      final ax = a.x * fw;
+      final ay = a.y * fh;
+      final bx = b.x * fw;
+      final by = b.y * fh;
+
+      // ── Soft outer aura — very transparent, tight to tube (no separate oval) ──
+      final auraR = fh * 0.028 * op;
+      if (auraR > 0.5) {
+        canvas.drawLine(
+          Offset(ax, ay), Offset(bx, by),
+          Paint()
+            ..blendMode  = BlendMode.screen
+            ..strokeWidth = auraR * 2.0
+            ..strokeCap  = StrokeCap.round
+            ..style      = PaintingStyle.stroke
+            ..color      = Color.fromARGB(
+                (op * 38).clamp(0, 255).toInt(), 110, 20, 240),
+        );
+      }
+
+      // ── Main body — semi-transparent violet glow ──────────────────────────
+      final bodyR = fh * 0.016 * op;
+      if (bodyR > 0.5) {
+        canvas.drawLine(
+          Offset(ax, ay), Offset(bx, by),
+          Paint()
+            ..blendMode  = BlendMode.screen
+            ..strokeWidth = bodyR * 2.0
+            ..strokeCap  = StrokeCap.round
+            ..style      = PaintingStyle.stroke
+            ..color      = Color.fromARGB(
+                (op * 180).clamp(0, 255).toInt(), 190, 60, 255),
+        );
+      }
+
+      // ── Bright core — white-violet, thinnest ─────────────────────────────
+      final coreR = fh * 0.006 * op;
+      if (coreR > 0.3) {
+        canvas.drawLine(
+          Offset(ax, ay), Offset(bx, by),
+          Paint()
+            ..blendMode  = BlendMode.screen
+            ..strokeWidth = coreR * 2.0
+            ..strokeCap  = StrokeCap.round
+            ..style      = PaintingStyle.stroke
+            ..color      = Color.fromARGB(
+                (op * 230).clamp(0, 255).toInt(), 240, 200, 255),
+        );
+      }
     }
-    canvas.restore();
   }
 
-  /// Draws one segment as a filled rounded stroke using drawLine with strokeCap.round.
-  /// Opacity AND radius both go to zero at the tail — no ball artifact.
-  void _drawSegmentCircle(
-    Canvas canvas,
-    TrailPoint a,
-    TrailPoint b,
-    double fw,
-    double fh, {
-    required double radiusFactor,
-    required double alphaNew,
-    required double alphaOld,
-    required Color  colorNew,
-    required Color  colorOld,
-  }) {
-    final ageA = a.age.clamp(0.0, 1.0);
-    final ageB = b.age.clamp(0.0, 1.0);
-
-    // Cubic ease-out: opacity drops steeply near tail
-    // Both opacity AND radius reach 0 at age=1 — no residual ball
-    final opA = pow(1.0 - ageA, 2.2) as double;
-    final opB = pow(1.0 - ageB, 2.2) as double;
-    final opAvg = (opA + opB) * 0.5;
-    if (opAvg < 0.004) return;
-
-    // Radius: large near finger, tapers to exactly 0 at tail
-    // 0.042 * fh at newest, 0 at oldest — gives a pointed tail, no ball
-    final rA = fh * 0.042 * opA * radiusFactor;
-    final rB = fh * 0.042 * opB * radiusFactor;
-    final rAvg = (rA + rB) * 0.5;
-    if (rAvg < 0.5) return;
-
-    final col = Color.lerp(colorOld, colorNew, opAvg)!;
-    final alpha = (opAvg * (ageA < ageB ? alphaNew : alphaOld) +
-                   opAvg * (ageA < ageB ? alphaOld : alphaNew)) * 0.5;
-    // Simpler: just use opAvg-scaled colorNew alpha
-    final paint = Paint()
-      ..color      = col.withOpacity((opAvg * alphaNew).clamp(0.0, 1.0))
-      ..strokeWidth = rAvg * 2.0
-      ..strokeCap  = StrokeCap.round
-      ..style      = PaintingStyle.stroke;
-
-    canvas.drawLine(
-      Offset(a.x * fw, a.y * fh),
-      Offset(b.x * fw, b.y * fh),
-      paint,
-    );
-  }
-
-  // ── Live finger blob ──────────────────────────────────────────────────────
   void _drawFinger(Canvas canvas, double fw, double fh) {
     final tf = engine.touchForce;
     if (tf < 0.01) return;
 
     final fx = engine.touch.dx * fw;
     final fy = engine.touch.dy * fh;
-    final r  = fh * 0.055 * tf; // slightly smaller than before
+    final r  = fh * 0.055 * tf;
 
-    // Outer aura
+    // Outer soft aura
     canvas.drawCircle(
-      Offset(fx, fy),
-      r * 2.6,
+      Offset(fx, fy), r * 2.4,
       Paint()
         ..blendMode = BlendMode.screen
         ..shader    = ui.Gradient.radial(
-          Offset(fx, fy), r * 2.6,
+          Offset(fx, fy), r * 2.4,
           [
-            Color.fromARGB((tf * 25).clamp(0, 255).toInt(), 100, 20, 220),
+            Color.fromARGB((tf * 30).clamp(0, 255).toInt(), 100, 20, 220),
             const Color(0x00000000),
           ],
         ),
@@ -210,15 +175,14 @@ class FluidPainter extends CustomPainter {
 
     // Main body
     canvas.drawCircle(
-      Offset(fx, fy),
-      r,
+      Offset(fx, fy), r,
       Paint()
         ..blendMode = BlendMode.screen
         ..shader    = ui.Gradient.radial(
           Offset(fx, fy), r,
           [
-            Color.fromARGB((tf * 210).clamp(0, 255).toInt(), 190, 80, 255),
-            Color.fromARGB((tf * 90).clamp(0, 255).toInt(),  120, 25, 230),
+            Color.fromARGB((tf * 200).clamp(0, 255).toInt(), 190, 80, 255),
+            Color.fromARGB((tf * 80).clamp(0, 255).toInt(),  120, 25, 230),
             const Color(0x00000000),
           ],
           [0.0, 0.5, 1.0],
@@ -227,8 +191,7 @@ class FluidPainter extends CustomPainter {
 
     // Hot core
     canvas.drawCircle(
-      Offset(fx, fy),
-      r * 0.28,
+      Offset(fx, fy), r * 0.28,
       Paint()
         ..blendMode = BlendMode.screen
         ..shader    = ui.Gradient.radial(
@@ -290,8 +253,7 @@ class FluidPainter extends CustomPainter {
     if (tb > 0.02) {
       final br = fh * 0.12 * tb;
       canvas.drawCircle(
-        Offset(fx, fy),
-        br,
+        Offset(fx, fy), br,
         Paint()
           ..blendMode = BlendMode.screen
           ..shader    = ui.Gradient.radial(
