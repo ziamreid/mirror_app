@@ -42,7 +42,7 @@ class _FluidScreenState extends State<FluidScreen>
   double _prevT = 0.0;
   Size   _size  = Size.zero;
 
-  final FluidEngine   _engine  = FluidEngine();
+  final FluidEngine _engine  = FluidEngine();
   final _repaint = ValueNotifier<int>(0);
   bool _physicsRunning = false;
 
@@ -58,10 +58,8 @@ class _FluidScreenState extends State<FluidScreen>
     final t  = elapsed.inMilliseconds / 1000.0;
     final dt = (t - _prevT).clamp(0.0, 0.05);
     _prevT   = t;
-
     _engine.tick(dt);
     if (!_physicsRunning) _dispatchPhysics(dt);
-
     _repaint.value++;
   }
 
@@ -85,6 +83,7 @@ class _FluidScreenState extends State<FluidScreen>
     final nx = d.localPosition.dx / _size.width;
     final ny = d.localPosition.dy / _size.height;
     final as = _size.width / _size.height;
+    _engine.setTouching(true);
     _engine.resetTrail(nx, ny);
     _engine.setTouch(Offset(nx, ny));
     _engine.setTouchForce(1.0);
@@ -108,7 +107,6 @@ class _FluidScreenState extends State<FluidScreen>
     final as = _size.width / _size.height;
     final vx = d.delta.dx / _size.width;
     final vy = d.delta.dy / _size.height;
-
     _engine.setTouch(Offset(nx, ny));
     final prev = _engine.velocity;
     _engine.setVelocity(Offset(
@@ -122,6 +120,7 @@ class _FluidScreenState extends State<FluidScreen>
 
   void _onPanEnd(DragEndDetails d) {
     if (_size == Size.zero) return;
+    _engine.setTouching(false); // triggers fast decay
     final pv = d.velocity.pixelsPerSecond;
     final as = _size.width / _size.height;
     _engine.velocityField.addForce(
