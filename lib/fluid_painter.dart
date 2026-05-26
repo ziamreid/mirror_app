@@ -9,8 +9,8 @@ class TrailPoint {
 }
 
 class FluidEngine {
-  static const int    _kTrailLen   = 60;
-  static const double _kTrailDecay = 0.05;
+  static const int    _kTrailLen   = 80;
+  static const double _kTrailDecay = 0.045;
 
   Offset _touch      = const Offset(0.5, 0.5);
   Offset _velocity   = Offset.zero;
@@ -78,6 +78,7 @@ class FluidPainter extends CustomPainter {
   }
 
   void _drawTrail(Canvas canvas, double fw, double fh) {
+    // Collect active points newest-first
     final pts = <TrailPoint>[];
     for (int i = 0; i < FluidEngine._kTrailLen; i++) {
       final idx = (engine._trailHead - 1 - i + FluidEngine._kTrailLen) % FluidEngine._kTrailLen;
@@ -85,70 +86,101 @@ class FluidPainter extends CustomPainter {
       if (p.age >= 0.97) break;
       pts.add(p);
     }
-    if (pts.length < 2) return;
+    if (pts.length < 3) return;
 
-    // Draw oldest → newest so newer segments paint on top
-    for (int i = pts.length - 2; i >= 0; i--) {
-      final a = pts[i];
-      final b = pts[i + 1];
+    // Build one smooth catmull-rom path through all points
+    // then draw it 3 times (aura, body, core) with different widths
+    final path = _buildSmoothPath(pts, fw, fh);
 
-      // Use the OLDER point's age to drive everything — the older end controls fade
-      final age = b.age.clamp(0.0, 1.0); // b is older (further from head)
+    // How much of the trail is visible — drives the gradient
+    final newestAge = pts.first.age.clamp(0.0, 1.0);
+    final oldestAge = pts.last.age.clamp(0.0, 1.0);
 
-      // Cubic: reaches 0 well before age=1, so tail completely vanishes — no ball
-      final op = pow(1.0 - age, 2.5) as double;
-      if (op < 0.006) continue;
+    // ── Aura — wide, very soft ────────────────────────────────────────────────
+    canvas.drawPath(path, Paint()
+      ..blendMode  = BlendMode.screen
+      ..strokeWidth = fh * 0.038
+      ..strokeCap  = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round
+      ..style      = PaintingStyle.stroke
+      ..shader     = _trailShader(pts, fw, fh,
+          colorNew: const Color(0x286020E0),
+          colorOld: const Color(0x00000000))
+    );
 
-      final ax = a.x * fw;
-      final ay = a.y * fh;
-      final bx = b.x * fw;
-      final by = b.y * fh;
+    // ── Body — medium, glowing violet ─────────────────────────────────────────
+    canvas.drawPath(path, Paint()
+      ..blendMode  = BlendMode.screen
+      ..strokeWidth = fh * 0.018
+      ..strokeCap  = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round
+      ..style      = PaintingStyle.stroke
+      ..shader     = _trailShader(pts, fw, fh,
+          colorNew: const Color(0xCCB040FF),
+          colorOld: const Color(0x00000000))
+    );
 
-      // ── Soft outer aura — very transparent, tight to tube (no separate oval) ──
-      final auraR = fh * 0.028 * op;
-      if (auraR > 0.5) {
-        canvas.drawLine(
-          Offset(ax, ay), Offset(bx, by),
-          Paint()
-            ..blendMode  = BlendMode.screen
-            ..strokeWidth = auraR * 2.0
-            ..strokeCap  = StrokeCap.round
-            ..style      = PaintingStyle.stroke
-            ..color      = Color.fromARGB(
-                (op * 38).clamp(0, 255).toInt(), 110, 20, 240),
-        );
-      }
+    // ── Core — thin, bright white-violet ─────────────────────────────────────
+    canvas.drawPath(path, Paint()
+      ..blendMode  = BlendMode.screen
+      ..strokeWidth = fh * 0.007
+      ..strokeCap  = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round
+      ..style      = PaintingStyle.stroke
+      ..shader     = _trailShader(pts, fw, fh,
+          colorNew: const Color(0xFFEEC8FF),
+          colorOld: const Color(0x00000000))
+    );
+  }
 
-      // ── Main body — semi-transparent violet glow ──────────────────────────
-      final bodyR = fh * 0.016 * op;
-      if (bodyR > 0.5) {
-        canvas.drawLine(
-          Offset(ax, ay), Offset(bx, by),
-          Paint()
-            ..blendMode  = BlendMode.screen
-            ..strokeWidth = bodyR * 2.0
-            ..strokeCap  = StrokeCap.round
-            ..style      = PaintingStyle.stroke
-            ..color      = Color.fromARGB(
-                (op * 180).clamp(0, 255).toInt(), 190, 60, 255),
-        );
-      }
+  // Build a smooth path using Catmull-Rom → Bezier conversion
+  Path _buildSmoothPath(List<TrailPoint> pts, double fw, double fh) {
+    final path = Path();
+    // pts[0] = newest (finger), pts.last = oldest (tail)
+    // Draw from tail to finger so newest is the "end" with full opacity
+    final n = pts.length;
 
-      // ── Bright core — white-violet, thinnest ─────────────────────────────
-      final coreR = fh * 0.006 * op;
-      if (coreR > 0.3) {
-        canvas.drawLine(
-          Offset(ax, ay), Offset(bx, by),
-          Paint()
-            ..blendMode  = BlendMode.screen
-            ..strokeWidth = coreR * 2.0
-            ..strokeCap  = StrokeCap.round
-            ..style      = PaintingStyle.stroke
-            ..color      = Color.fromARGB(
-                (op * 230).clamp(0, 255).toInt(), 240, 200, 255),
-        );
-      }
+    path.moveTo(pts[n - 1].x * fw, pts[n - 1].y * fh);
+
+    for (int i = n - 1; i >= 1; i--) {
+      // Catmull-Rom control points
+      final p0 = pts[(i + 1).clamp(0, n - 1)];
+      final p1 = pts[i];
+      final p2 = pts[i - 1];
+      final p3 = pts[(i - 2).clamp(0, n - 1)];
+
+      // Convert to cubic bezier
+      final cp1x = p1.x + (p2.x - p0.x) / 6.0;
+      final cp1y = p1.y + (p2.y - p0.y) / 6.0;
+      final cp2x = p2.x - (p3.x - p1.x) / 6.0;
+      final cp2y = p2.y - (p3.y - p1.y) / 6.0;
+
+      path.cubicTo(
+        cp1x * fw, cp1y * fh,
+        cp2x * fw, cp2y * fh,
+        p2.x * fw, p2.y * fh,
+      );
     }
+
+    return path;
+  }
+
+  // Linear gradient along the trail: new=colorNew (bright), old=colorOld (transparent)
+  // Uses the bounding box of the path endpoints as gradient direction
+  ui.Shader _trailShader(
+    List<TrailPoint> pts,
+    double fw,
+    double fh, {
+    required Color colorNew,
+    required Color colorOld,
+  }) {
+    final newest = pts.first;
+    final oldest = pts.last;
+    return ui.Gradient.linear(
+      Offset(newest.x * fw, newest.y * fh), // finger end = bright
+      Offset(oldest.x * fw, oldest.y * fh), // tail end   = transparent
+      [colorNew, colorOld],
+    );
   }
 
   void _drawFinger(Canvas canvas, double fw, double fh) {
@@ -228,7 +260,6 @@ class FluidPainter extends CustomPainter {
             ],
           ),
       );
-
       canvas.drawLine(
         Offset(fx, fy),
         Offset(fx + nx * streakLen, fy + ny * streakLen),
