@@ -87,12 +87,12 @@ void main() {
   // ─── Curl centered on touch ───────────────────────────────────────────────
   vec2  toTouch   = uv - u_touch;
   float dist      = length(toTouch);
-  float influence = u_touchForce / (dist * dist * 18.0 + 0.15);
+  float influence = u_touchForce / (dist * dist * 35.0 + 0.15);
   influence       = clamp(influence, 0.0, 1.2);
 
-  vec2 curlSeed = (uv - u_touch) * 2.5 + u_velocity * 3.0 + u_time * 0.2;
+  vec2 curlSeed = (uv - u_touch) * 5.0 + u_velocity * 3.0 + u_time * 0.2;
   vec2 curlVec  = curl(curlSeed, u_time * 0.15);
-  vec2 baseUV   = uv + curlVec * influence * 0.30;
+  vec2 baseUV   = uv + curlVec * influence * 0.22;
 
   // Tiny grid contribution
   vec2 gridVel = texture(u_velocityField, uv).rg * 2.0 - 1.0;
