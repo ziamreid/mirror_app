@@ -16,9 +16,8 @@ void main() {
 // Returns:  Float32List packed as:
 //   [0    .. 1023] = updated velX
 //   [1024 .. 2047] = updated velY
-//   [2048 .. 3071] = pixel R values as floats (0..255)
-//   [3072 .. 4095] = pixel G values as floats (0..255)
-// We avoid Uint8List crossing isolate boundary by using Float32List throughout.
+//   [2048 .. 3071] = pixel R values as floats (0..255)  — velX encoded
+//   [3072 .. 4095] = pixel G values as floats (0..255)  — velY encoded
 Float32List _physicsStep(List<dynamic> args) {
   final Float32List velX = args[0] as Float32List;
   final Float32List velY = args[1] as Float32List;
@@ -30,13 +29,10 @@ Float32List _physicsStep(List<dynamic> args) {
   const int n = VelocityField.kCells; // 1024
   final out   = Float32List(n * 4);
 
-  // Pack velX and velY
   for (int i = 0; i < n; i++) {
-    out[i]         = field.velX[i];
-    out[n + i]     = field.velY[i];
+    out[i]     = field.velX[i];
+    out[n + i] = field.velY[i];
   }
-
-  // Pack encoded pixel channels (R=velX encoded, G=velY encoded)
   for (int i = 0; i < n; i++) {
     final vx = field.velX[i].clamp(-1.0, 1.0);
     final vy = field.velY[i].clamp(-1.0, 1.0);
@@ -69,24 +65,23 @@ class _FluidScreenState extends State<FluidScreen>
     with SingleTickerProviderStateMixin {
   ui.FragmentShader? _shader;
   late Ticker         _ticker;
-  bool                _loaded  = false;
+  bool                _loaded = false;
   String?             _errorMessage;
 
-  double _time       = 0.0;
-  double _breath     = 0.5;
-  Offset _touch      = const Offset(0.5, 0.5);
-  double _touchForce = 0.0;
-  Offset _velocity   = Offset.zero;
-  final Offset _gyro = Offset.zero;
-  Size   _size       = Size.zero;
+  double _time    = 0.0;
+  double _breath  = 0.5;
+  Size   _size    = Size.zero;
 
-  final _velocityField  = VelocityField();
+  // Gyro — will be wired in Phase B.
+  // Kept as zero here so the shader uniform slot is always filled correctly.
+  final Offset _gyro = Offset.zero;
+
+  final _velocityField = VelocityField();
   ui.Image? _velocityTexture;
 
-  // True while isolate is running — prevents stacking physics calls
   bool _physicsRunning = false;
 
-  // Pre-allocated RGBA pixel buffer for decodeImageFromPixels
+  // Pre-allocated RGBA pixel buffer — no allocation per frame
   final Uint8List _pixelBuffer =
       Uint8List(VelocityField.kSize * VelocityField.kSize * 4);
 
@@ -106,7 +101,6 @@ class _FluidScreenState extends State<FluidScreen>
         'assets/shaders/fluid.frag',
       );
       _shader = program.fragmentShader();
-      // Build first texture synchronously — guarantees sampler bound before paint
       await _buildTextureOnce();
       if (mounted) setState(() => _loaded = true);
     } catch (e) {
@@ -135,27 +129,21 @@ class _FluidScreenState extends State<FluidScreen>
     final dt = (t - _time).clamp(0.0, 0.05);
     _time    = t;
 
-    // Breath animation always runs — never blocked
+    // Breath — always runs, never blocked
     final breathCycle = (t % 8.0) / 8.0;
     _breath = (sin(breathCycle * 2 * pi - pi / 2) + 1.0) / 2.0;
 
-    _touchForce = (_touchForce - dt * 0.8).clamp(0.0, 1.0);
-    _velocity   = _velocity * 0.88;
-
-    // Dispatch physics to isolate only if previous one finished
-    // and frame isn't running late
+    // Dispatch physics to isolate only if previous finished and frame not late
     if (!_physicsRunning && dt < 0.033) {
       _dispatchPhysics(dt);
     }
 
-    // Render always happens regardless of physics state
     _repaint.value++;
   }
 
   void _dispatchPhysics(double dt) {
     _physicsRunning = true;
 
-    // Snapshot current arrays — isolate gets independent copies
     final velXSnap = Float32List.fromList(_velocityField.velX);
     final velYSnap = Float32List.fromList(_velocityField.velY);
 
@@ -165,19 +153,19 @@ class _FluidScreenState extends State<FluidScreen>
     ).then((Float32List result) {
       const int n = VelocityField.kCells;
 
-      // Unpack updated velocity arrays back into our field
+      // Unpack updated velocity arrays
       _velocityField.velX.setAll(0, result.sublist(0, n));
       _velocityField.velY.setAll(0, result.sublist(n, n * 2));
 
       // Unpack pixel channels into RGBA buffer
       for (int i = 0; i < n; i++) {
-        _pixelBuffer[i * 4 + 0] = result[n * 2 + i].toInt(); // R = velX encoded
-        _pixelBuffer[i * 4 + 1] = result[n * 3 + i].toInt(); // G = velY encoded
+        _pixelBuffer[i * 4 + 0] = result[n * 2 + i].toInt();
+        _pixelBuffer[i * 4 + 1] = result[n * 3 + i].toInt();
         _pixelBuffer[i * 4 + 2] = 0;
         _pixelBuffer[i * 4 + 3] = 255;
       }
 
-      // Decode into GPU texture — fast, pixels already ready
+      // Decode into GPU texture
       ui.decodeImageFromPixels(
         _pixelBuffer,
         VelocityField.kSize,
@@ -196,34 +184,18 @@ class _FluidScreenState extends State<FluidScreen>
     });
   }
 
-  // Burst on finger landing — fluid parts immediately on touch
+  // ─── Touch handlers ──────────────────────────────────────────────────────────
+
   void _onPanStart(DragStartDetails details) {
     if (_size == Size.zero) return;
     final nx     = details.localPosition.dx / _size.width;
     final ny     = details.localPosition.dy / _size.height;
     final aspect = _size.width / _size.height;
-    // Radial burst — inject force outward in 4 directions
+    // Radial burst — fluid parts immediately on finger landing
     _velocityField.addForce(nx, ny,  0.08,  0.0,  aspect: aspect);
     _velocityField.addForce(nx, ny, -0.08,  0.0,  aspect: aspect);
     _velocityField.addForce(nx, ny,  0.0,   0.08, aspect: aspect);
     _velocityField.addForce(nx, ny,  0.0,  -0.08, aspect: aspect);
-    _touch      = Offset(nx, ny);
-    _touchForce = 1.0;
-  }
-
-  // Natural lift-off — inject final velocity on release
-  void _onPanEnd(DragEndDetails details) {
-    final vel = details.velocity.pixelsPerSecond;
-    if (_size == Size.zero) return;
-    final nx     = _touch.dx;
-    final ny     = _touch.dy;
-    final aspect = _size.width / _size.height;
-    _velocityField.addForce(
-      nx, ny,
-      vel.dx * 0.0008,
-      vel.dy * 0.0008,
-      aspect: aspect,
-    );
   }
 
   void _onPanUpdate(DragUpdateDetails details) {
@@ -237,12 +209,22 @@ class _FluidScreenState extends State<FluidScreen>
       details.delta.dy * 12.0 / _size.height,
       aspect: aspect,
     );
-    _touch      = Offset(nx, ny);
-    _velocity   = Offset(
-      details.delta.dx / _size.width,
-      details.delta.dy / _size.height,
+  }
+
+  void _onPanEnd(DragEndDetails details) {
+    if (_size == Size.zero) return;
+    // Inject final velocity so fluid continues after finger lifts
+    final vel    = details.velocity.pixelsPerSecond;
+    final aspect = _size.width / _size.height;
+    // Use last known position — approximate centre if unavailable
+    final nx = 0.5;
+    final ny = 0.5;
+    _velocityField.addForce(
+      nx, ny,
+      vel.dx * 0.0008,
+      vel.dy * 0.0008,
+      aspect: aspect,
     );
-    _touchForce = 1.0;
   }
 
   @override
@@ -294,38 +276,45 @@ class _FluidScreenState extends State<FluidScreen>
   }
 }
 
+// ─── Painter ──────────────────────────────────────────────────────────────────
 class _FluidPainter extends CustomPainter {
-  final ui.FragmentShader  shader;
-  final _FluidScreenState  state;
+  final ui.FragmentShader _shader;
+  final _FluidScreenState _state;
 
   _FluidPainter({
-    required this.shader,
-    required this.state,
+    required ui.FragmentShader shader,
+    required _FluidScreenState state,
     required Listenable repaint,
-  }) : super(repaint: repaint);
+  })  : _shader = shader,
+        _state  = state,
+        super(repaint: repaint);
 
   @override
   void paint(Canvas canvas, Size size) {
-    final texture = state._velocityTexture;
+    final texture = _state._velocityTexture;
     if (texture == null) return;
 
-    shader.setFloat(0,  state._time);
-    shader.setFloat(1,  size.width);
-    shader.setFloat(2,  size.height);
-    shader.setFloat(3,  state._touch.dx);
-    shader.setFloat(4,  state._touch.dy);
-    shader.setFloat(5,  state._touchForce);
-    shader.setFloat(6,  state._velocity.dx);
-    shader.setFloat(7,  state._velocity.dy);
-    shader.setFloat(8,  state._breath);
-    shader.setFloat(9,  state._gyro.dx);
-    shader.setFloat(10, state._gyro.dy);
+    // ── Uniform slot map (must match fluid.frag exactly) ──────────────────────
+    // Removed: u_touch (3,4), u_touchForce (5), u_velocity (6,7)
+    // New order after cleanup:
+    //   0        u_time
+    //   1, 2     u_resolution (x, y)
+    //   3        u_breath
+    //   4, 5     u_gyro (x, y)
+    //   sampler0 u_velocityField
 
-    shader.setImageSampler(0, texture);
+    _shader.setFloat(0, _state._time);
+    _shader.setFloat(1, size.width);
+    _shader.setFloat(2, size.height);
+    _shader.setFloat(3, _state._breath);
+    _shader.setFloat(4, _state._gyro.dx);   // zero until Phase B
+    _shader.setFloat(5, _state._gyro.dy);   // zero until Phase B
+
+    _shader.setImageSampler(0, texture);
 
     canvas.drawRect(
       Rect.fromLTWH(0, 0, size.width, size.height),
-      Paint()..shader = shader,
+      Paint()..shader = _shader,
     );
   }
 
