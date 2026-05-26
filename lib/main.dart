@@ -5,21 +5,19 @@ import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
-import 'package:flutter/services.dart';
 import 'velocity_field.dart';
 
 void main() {
-  WidgetsFlutterBinding.ensureInitialized();
-  // Request highest available refresh rate from the OS (120Hz on ProMotion)
-  // Flutter will negotiate the actual rate with the display hardware.
-  SystemChrome.setPreferredOrientations([
-    DeviceOrientation.portraitUp,
-    DeviceOrientation.portraitDown,
-  ]);
   runApp(const MyApp());
 }
 
-// ─── Isolate function ─────────────────────────────────────────────────────────
+// ─── Trail point ──────────────────────────────────────────────────────────────
+class _TrailPoint {
+  double x, y, age; // age: 0=fresh, 1=gone
+  _TrailPoint(this.x, this.y) : age = 0.0;
+}
+
+// ─── Isolate ──────────────────────────────────────────────────────────────────
 Float32List _physicsStep(List<dynamic> args) {
   final Float32List velX = args[0] as Float32List;
   final Float32List velY = args[1] as Float32List;
@@ -30,7 +28,6 @@ Float32List _physicsStep(List<dynamic> args) {
 
   const int n = VelocityField.kCells;
   final out   = Float32List(n * 4);
-
   for (int i = 0; i < n; i++) {
     out[i]     = field.velX[i];
     out[n + i] = field.velY[i];
@@ -41,7 +38,6 @@ Float32List _physicsStep(List<dynamic> args) {
     out[n * 2 + i] = (vx * 127.5 + 127.5).roundToDouble();
     out[n * 3 + i] = (vy * 127.5 + 127.5).roundToDouble();
   }
-
   return out;
 }
 
@@ -49,12 +45,10 @@ Float32List _physicsStep(List<dynamic> args) {
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
   @override
-  Widget build(BuildContext context) {
-    return const MaterialApp(
-      debugShowCheckedModeBanner: false,
-      home: FluidScreen(),
-    );
-  }
+  Widget build(BuildContext context) => const MaterialApp(
+        debugShowCheckedModeBanner: false,
+        home: FluidScreen(),
+      );
 }
 
 class FluidScreen extends StatefulWidget {
@@ -80,9 +74,18 @@ class _FluidScreenState extends State<FluidScreen>
 
   final Offset _gyro = Offset.zero;
 
+  // Trail ring buffer — 8 points, aged over time
+  static const int _kTrailLen = 8;
+  final List<_TrailPoint> _trail = List.generate(
+    _kTrailLen, (_) => _TrailPoint(0.5, 0.5)..age = 1.0, // start fully aged (invisible)
+  );
+  int _trailHead = 0;
+
+  // Trail age speed: 1.0 = fully aged (gone) in 1 second
+  static const double _kTrailDecay = 0.9;
+
   final _velocityField = VelocityField();
   ui.Image? _velocityTexture;
-
   bool _physicsRunning = false;
 
   final Uint8List _pixelBuffer =
@@ -96,9 +99,6 @@ class _FluidScreenState extends State<FluidScreen>
     _loadShader();
     _ticker = createTicker(_onTick);
     _ticker.start();
-
-    // 120Hz ProMotion is unlocked via CADisableMinimumFrameDurationOnPhone
-    // in ios/Runner/Info.plist — no Dart-side code needed.
   }
 
   Future<void> _loadShader() async {
@@ -137,11 +137,13 @@ class _FluidScreenState extends State<FluidScreen>
     final breathCycle = (t % 8.0) / 8.0;
     _breath = (sin(breathCycle * 2 * pi - pi / 2) + 1.0) / 2.0;
 
-    // Touch force decays over ~1.2 seconds
     _touchForce = (_touchForce - dt * 0.85).clamp(0.0, 1.0);
+    _velocity   = _velocity * 0.82;
 
-    // Velocity decays between drag events
-    _velocity = _velocity * 0.82;
+    // Age all trail points
+    for (final p in _trail) {
+      p.age = (p.age + dt * _kTrailDecay).clamp(0.0, 1.0);
+    }
 
     if (!_physicsRunning && dt < 0.033) {
       _dispatchPhysics(dt);
@@ -150,9 +152,14 @@ class _FluidScreenState extends State<FluidScreen>
     _repaint.value++;
   }
 
+  void _pushTrail(double nx, double ny) {
+    // Overwrite oldest slot (ring buffer)
+    _trail[_trailHead] = _TrailPoint(nx, ny);
+    _trailHead = (_trailHead + 1) % _kTrailLen;
+  }
+
   void _dispatchPhysics(double dt) {
     _physicsRunning = true;
-
     final velXSnap = Float32List.fromList(_velocityField.velX);
     final velYSnap = Float32List.fromList(_velocityField.velY);
 
@@ -161,17 +168,14 @@ class _FluidScreenState extends State<FluidScreen>
       [velXSnap, velYSnap, dt],
     ).then((Float32List result) {
       const int n = VelocityField.kCells;
-
       _velocityField.velX.setAll(0, result.sublist(0, n));
       _velocityField.velY.setAll(0, result.sublist(n, n * 2));
-
       for (int i = 0; i < n; i++) {
         _pixelBuffer[i * 4 + 0] = result[n * 2 + i].toInt();
         _pixelBuffer[i * 4 + 1] = result[n * 3 + i].toInt();
         _pixelBuffer[i * 4 + 2] = 0;
         _pixelBuffer[i * 4 + 3] = 255;
       }
-
       ui.decodeImageFromPixels(
         _pixelBuffer,
         VelocityField.kSize,
@@ -185,48 +189,47 @@ class _FluidScreenState extends State<FluidScreen>
         },
       );
     }).catchError((Object e) {
-      debugPrint('Physics isolate error: $e');
+      debugPrint('Physics error: $e');
       _physicsRunning = false;
     });
   }
 
-  // ─── Touch handlers ───────────────────────────────────────────────────────
-  void _onPanStart(DragStartDetails details) {
+  // ─── Touch ────────────────────────────────────────────────────────────────
+  void _onPanStart(DragStartDetails d) {
     if (_size == Size.zero) return;
-    final nx     = details.localPosition.dx / _size.width;
-    final ny     = details.localPosition.dy / _size.height;
+    final nx = d.localPosition.dx / _size.width;
+    final ny = d.localPosition.dy / _size.height;
     final aspect = _size.width / _size.height;
     _touch      = Offset(nx, ny);
     _touchForce = 1.0;
+    _pushTrail(nx, ny);
     _velocityField.addForce(nx, ny,  0.08,  0.0,  aspect: aspect);
     _velocityField.addForce(nx, ny, -0.08,  0.0,  aspect: aspect);
     _velocityField.addForce(nx, ny,  0.0,   0.08, aspect: aspect);
     _velocityField.addForce(nx, ny,  0.0,  -0.08, aspect: aspect);
   }
 
-  void _onPanUpdate(DragUpdateDetails details) {
+  void _onPanUpdate(DragUpdateDetails d) {
     if (_size == Size.zero) return;
-    final nx     = details.localPosition.dx / _size.width;
-    final ny     = details.localPosition.dy / _size.height;
+    final nx     = d.localPosition.dx / _size.width;
+    final ny     = d.localPosition.dy / _size.height;
     final aspect = _size.width / _size.height;
-    final vx     = details.delta.dx / _size.width;
-    final vy     = details.delta.dy / _size.height;
-
+    final vx     = d.delta.dx / _size.width;
+    final vy     = d.delta.dy / _size.height;
     _touch      = Offset(nx, ny);
     _velocity   = Offset(vx, vy);
     _touchForce = 1.0;
-
+    _pushTrail(nx, ny);
     _velocityField.addForce(nx, ny, vx * 12.0, vy * 12.0, aspect: aspect);
   }
 
-  void _onPanEnd(DragEndDetails details) {
+  void _onPanEnd(DragEndDetails d) {
     if (_size == Size.zero) return;
-    final vel    = details.velocity.pixelsPerSecond;
+    final vel    = d.velocity.pixelsPerSecond;
     final aspect = _size.width / _size.height;
     _velocityField.addForce(
       _touch.dx, _touch.dy,
-      vel.dx * 0.0008,
-      vel.dy * 0.0008,
+      vel.dx * 0.0008, vel.dy * 0.0008,
       aspect: aspect,
     );
     _velocity = Offset(vel.dx * 0.0005, vel.dy * 0.0005);
@@ -250,16 +253,11 @@ class _FluidScreenState extends State<FluidScreen>
         onPanUpdate: _onPanUpdate,
         onPanEnd:    _onPanEnd,
         child: _errorMessage != null
-            ? Center(
-                child: Padding(
-                  padding: const EdgeInsets.all(24),
-                  child: Text(
-                    'Error: $_errorMessage',
+            ? Center(child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Text('Error: $_errorMessage',
                     style: const TextStyle(color: Colors.red, fontSize: 12),
-                    textAlign: TextAlign.center,
-                  ),
-                ),
-              )
+                    textAlign: TextAlign.center)))
             : _loaded && _shader != null && _velocityTexture != null
                 ? RepaintBoundary(
                     child: CustomPaint(
@@ -271,11 +269,8 @@ class _FluidScreenState extends State<FluidScreen>
                       size: Size.infinite,
                     ),
                   )
-                : const Center(
-                    child: CircularProgressIndicator(
-                      color: Color(0xFF8844CC),
-                    ),
-                  ),
+                : const Center(child: CircularProgressIndicator(
+                    color: Color(0xFF8844CC))),
       ),
     );
   }
@@ -299,15 +294,11 @@ class _FluidPainter extends CustomPainter {
     final texture = _state._velocityTexture;
     if (texture == null) return;
 
-    // Uniform slot map — must match fluid.frag exactly:
-    //   0        u_time
-    //   1, 2     u_resolution
-    //   3        u_breath
-    //   4, 5     u_gyro
-    //   6, 7     u_touch
-    //   8, 9     u_velocity
-    //   10       u_touchForce
-    //   sampler0 u_velocityField
+    // Slot map — must match fluid.frag exactly:
+    // 0=time  1,2=resolution  3=breath  4,5=gyro
+    // 6,7=touch  8,9=velocity  10=touchForce
+    // 11..34 = trail (8 × 3 floats: x,y,age)
+    // sampler0 = velocityField
     _shader.setFloat(0,  _state._time);
     _shader.setFloat(1,  size.width);
     _shader.setFloat(2,  size.height);
@@ -319,6 +310,14 @@ class _FluidPainter extends CustomPainter {
     _shader.setFloat(8,  _state._velocity.dx);
     _shader.setFloat(9,  _state._velocity.dy);
     _shader.setFloat(10, _state._touchForce);
+
+    // Trail — 8 points × 3 floats = slots 11..34
+    for (int i = 0; i < _FluidScreenState._kTrailLen; i++) {
+      final p = _state._trail[i];
+      _shader.setFloat(11 + i * 3 + 0, p.x);
+      _shader.setFloat(11 + i * 3 + 1, p.y);
+      _shader.setFloat(11 + i * 3 + 2, p.age);
+    }
 
     _shader.setImageSampler(0, texture);
 
