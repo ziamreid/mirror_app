@@ -13,9 +13,9 @@ class TrailPoint {
 }
 
 class FluidEngine {
-  static const int    _kTrailLen   = 60;
-  static const double _kTrailDecay = 0.055;
-  static const double _kMinDist    = 0.010;
+  static const int    _kTrailLen   = 80;
+  static const double _kTrailDecay = 0.050;
+  static const double _kMinDist    = 0.007;
 
   Offset _touch      = const Offset(0.5, 0.5);
   Offset _lastPush   = const Offset(-1, -1);
@@ -51,14 +51,12 @@ class FluidEngine {
         p.age = (p.age + dt * _kTrailDecay).clamp(0.0, 1.0);
       }
     } else {
-      // Tail dies first (trailPos=1.0 → fastest), head lingers (trailPos=0.0 → slowest)
-      // Uses OPACITY-based fade only — no radius shrinking on release = no dots
       for (int i = 0; i < _kTrailLen; i++) {
         final idx = (_trailHead - 1 - i + _kTrailLen) % _kTrailLen;
         final p   = trail[idx];
         if (p.age >= 1.0) continue;
-        final trailPos  = i / (_kTrailLen - 1).toDouble(); // 0=head,1=tail
-        final pointDecay = _kTrailDecay * 4.0 * (1.0 + trailPos * 3.0);
+        final trailPos   = i / (_kTrailLen - 1).toDouble();
+        final pointDecay = _kTrailDecay * 4.0 * (1.0 + trailPos * 3.5);
         p.age = (p.age + dt * pointDecay).clamp(0.0, 1.0);
       }
     }
@@ -80,7 +78,7 @@ class FluidEngine {
     final dx = nx - lx, dy = ny - ly;
     final dist = sqrt(dx * dx + dy * dy);
     if (dist < _kMinDist) return;
-    final steps = (dist / _kMinDist).ceil().clamp(1, 15);
+    final steps = (dist / _kMinDist).ceil().clamp(1, 20);
     for (int s = 1; s <= steps; s++) {
       final t = s / steps;
       _writePt(lx + dx * t, ly + dy * t);
@@ -105,10 +103,10 @@ class FluidEngine {
       final idx = (_trailHead - 1 - i + _kTrailLen) % _kTrailLen;
       final p   = trail[idx];
       if (p.age >= 0.98) continue;
-      final norm       = i / _kTrailLen;
-      final fwdStr     = (1.0 - norm) * (hasFling ? flingMag * 0.5 : 0.0);
-      final scatStr    = norm * 0.06;
-      final angle      = _rng.nextDouble() * 2 * pi;
+      final norm    = i / _kTrailLen;
+      final fwdStr  = (1.0 - norm) * (hasFling ? flingMag * 0.5 : 0.0);
+      final scatStr = norm * 0.06;
+      final angle   = _rng.nextDouble() * 2 * pi;
       p.driftX = normX * fwdStr + cos(angle) * scatStr;
       p.driftY = normY * fwdStr + sin(angle) * scatStr;
     }
@@ -126,6 +124,10 @@ class FluidEngine {
   void setTouchBurst(double b) => _touchBurst = b;
   void setTouching(bool v)     => _touching = v;
 }
+
+// ---------------------------------------------------------------------------
+// Painter
+// ---------------------------------------------------------------------------
 
 class FluidPainter extends CustomPainter {
   final FluidEngine engine;
@@ -145,47 +147,124 @@ class FluidPainter extends CustomPainter {
   }
 
   void _drawTrail(Canvas canvas, double fw, double fh) {
-    final auraR = fh * 0.26; // full-size radius
+    final int    len     = FluidEngine._kTrailLen;
+    final int    head    = engine.trailHead;
+    final double baseR   = fh * 0.20; // slightly smaller overall
 
-    for (int i = FluidEngine._kTrailLen - 1; i >= 0; i--) {
-      final idx = (engine.trailHead - 1 - i + FluidEngine._kTrailLen)
-          % FluidEngine._kTrailLen;
-      final p = engine.trail[idx];
+    for (int i = len - 1; i >= 0; i--) {
+      final idx = (head - 1 - i + len) % len;
+      final p   = engine.trail[idx];
       if (p.age >= 0.97) continue;
 
-      // Opacity only — fades gracefully, never becomes a dot
-      final op = pow(1.0 - p.age, 2.2) as double;
+      // trailPos: 0.0 = oldest/tail, 1.0 = newest/head
+      final trailPos = i / (len - 1).toDouble();
+      final op       = pow(1.0 - p.age, 2.2) as double;
       if (op < 0.01) continue;
 
-      // Radius tapers from head to tail — but NEVER below 40% so no dots
-      // Only opacity reaches 0, radius stays large enough to be invisible not dotty
-      final trailPos   = i / FluidEngine._kTrailLen.toDouble();
-      final radiusMult = 0.40 + (1.0 - trailPos) * 0.60; // 0.40(tail) → 1.0(head)
-      final r          = auraR * radiusMult;
+      final cx = p.x * fw;
+      final cy = p.y * fh;
+
+      // ── #2 Subtle width pulse — feels alive, not static ─────────────────
+      final pulse     = 1.0 + sin(trailPos * 18.0) * 0.04;
+
+      // ── #3 Explosive head — tip is 1.45× wider and brighter ─────────────
+      final headBoost = trailPos > 0.85
+          ? 1.0 + (trailPos - 0.85) / 0.15 * 0.45
+          : 1.0;
+
+      final sizeMult  = (0.35 + trailPos * 0.65) * pulse * headBoost;
+
+      // ── #4 Asymmetric falloff — wide soft halo + tight bright core ───────
+      final haloR = baseR * sizeMult;          // wide outer halo
+      final coreR = baseR * sizeMult * 0.22;   // tight inner core
+
+      // ── #1 Color temperature shift along trail ───────────────────────────
+      // tail: deep indigo → mid: violet-purple → head: hot white-pink
+      final headness = trailPos; // 0=tail, 1=head
+
+      // Halo colors shift indigo → violet → pink
+      final haloR1 = _lerpInt(30,  150, headness);   // red channel
+      final haloG1 = _lerpInt(5,   40,  headness);   // green channel
+      final haloB1 = _lerpInt(180, 255, headness);   // blue channel
+
+      final haloMidR = _lerpInt(80,  210, headness);
+      final haloMidG = _lerpInt(10,  80,  headness);
+      final haloMidB = _lerpInt(220, 255, headness);
+
+      // Pass 1: Wide outer halo — transparent center blooms at ~20% radius
+      canvas.drawCircle(
+        Offset(cx, cy), haloR,
+        Paint()
+          ..blendMode = BlendMode.screen
+          ..shader    = ui.Gradient.radial(
+            Offset(cx, cy), haloR,
+            [
+              const Color(0x00000000),
+              Color.fromARGB(_a(op * 0.45), haloR1,      haloG1,      haloB1),
+              Color.fromARGB(_a(op * 0.70), haloMidR,    haloMidG,    haloMidB),
+              Color.fromARGB(_a(op * 0.35), haloMidR~/2, haloMidG~/2, haloB1),
+              const Color(0x00000000),
+            ],
+            [0.0, 0.18, 0.38, 0.68, 1.0],
+          ),
+      );
+
+      // Pass 2: Tight bright core — white-hot at head, violet at tail
+      final coreHotR = _lerpInt(180, 255, headness);
+      final coreHotG = _lerpInt(60,  210, headness);
+      final coreHotB = 255;
+      final coreOpScale = 0.65 + headness * 0.35; // head glows harder
+
+      canvas.drawCircle(
+        Offset(cx, cy), coreR,
+        Paint()
+          ..blendMode = BlendMode.screen
+          ..shader    = ui.Gradient.radial(
+            Offset(cx, cy), coreR,
+            [
+              Color.fromARGB(_a(op * coreOpScale), coreHotR, coreHotG, coreHotB),
+              Color.fromARGB(_a(op * coreOpScale * 0.5), haloMidR, haloMidG, haloMidB),
+              const Color(0x00000000),
+            ],
+            [0.0, 0.55, 1.0],
+          ),
+      );
+    }
+
+    // ── #3 Extra explosive burst at the very tip (head 4 points) ────────────
+    for (int i = len - 1; i >= len - 5; i--) {
+      if (i < 0) continue;
+      final idx = (head - 1 - i + len) % len;
+      final p   = engine.trail[idx];
+      if (p.age >= 0.90) continue;
+
+      final op        = pow(1.0 - p.age, 1.8) as double;
+      final trailPos  = i / (len - 1).toDouble();
+      final burstStr  = (trailPos - 0.80) / 0.20; // 0→1 over last 4 pts
+      final burstR    = baseR * 0.55 * burstStr;
 
       final cx = p.x * fw;
       final cy = p.y * fh;
 
       canvas.drawCircle(
-        Offset(cx, cy), r,
+        Offset(cx, cy), burstR,
         Paint()
           ..blendMode = BlendMode.screen
           ..shader    = ui.Gradient.radial(
-            Offset(cx, cy), r,
+            Offset(cx, cy), burstR,
             [
-              Color.fromARGB(_a(op * 1.00), 255, 215, 255),
-              Color.fromARGB(_a(op * 0.85), 210,  80, 255),
-              Color.fromARGB(_a(op * 0.45), 140,  30, 230),
-              Color.fromARGB(_a(op * 0.12),  60,   5, 180),
+              Color.fromARGB(_a(op * 0.90), 255, 230, 255),
+              Color.fromARGB(_a(op * 0.50), 220, 120, 255),
               const Color(0x00000000),
             ],
-            [0.0, 0.10, 0.30, 0.60, 1.0],
+            [0.0, 0.45, 1.0],
           ),
       );
     }
   }
 
   static int _a(double v) => (v * 255).clamp(0, 255).toInt();
+  static int _lerpInt(int a, int b, double t) => (a + (b - a) * t).round().clamp(0, 255);
 
   @override
   bool shouldRepaint(FluidPainter old) => true;
