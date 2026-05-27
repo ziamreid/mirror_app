@@ -15,9 +15,9 @@ class TrailPoint {
 }
 
 class FluidEngine {
-  static const int    _kTrailLen   = 60;
+  static const int    _kTrailLen   = 80;
   static const double _kTrailDecay = 0.055;
-  static const double _kMinDist    = 0.014;
+  static const double _kMinDist    = 0.007;
 
   Offset _touch      = const Offset(0.5, 0.5);
   Offset _lastPush   = const Offset(-1, -1);
@@ -50,7 +50,7 @@ class FluidEngine {
       }
     }
 
-    final baseDecay = _touching ? _kTrailDecay : _kTrailDecay * 6.0;
+    final baseDecay = _touching ? _kTrailDecay : _kTrailDecay * 4.0;
 
     if (_touching) {
       // While dragging: uniform decay
@@ -68,7 +68,7 @@ class FluidEngine {
         // trailPos: 0.0=head(newest), 1.0=tail(oldest)
         final trailPos = i / (_kTrailLen - 1).toDouble();
         // tail decays 8x faster than head → tail gone first, head lingers
-        final pointDecay = baseDecay * (1.0 + trailPos * 7.0);
+        final pointDecay = baseDecay * (1.0 + trailPos * 3.5);
         p.age = (p.age + dt * pointDecay).clamp(0.0, 1.0);
       }
     }
