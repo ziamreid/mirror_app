@@ -15,9 +15,9 @@ class TrailPoint {
 }
 
 class FluidEngine {
-  static const int    _kTrailLen   = 200;
-  static const double _kTrailDecay = 0.028;
-  static const double _kMinDist    = 0.004;
+  static const int    _kTrailLen   = 120;
+  static const double _kTrailDecay = 0.055;
+  static const double _kMinDist    = 0.009;
 
   Offset _touch      = const Offset(0.5, 0.5);
   Offset _lastPush   = const Offset(-1, -1);
@@ -50,9 +50,27 @@ class FluidEngine {
       }
     }
 
-    final decayRate = _touching ? _kTrailDecay : _kTrailDecay * 6.0;
-    for (final p in trail) {
-      p.age = (p.age + dt * decayRate).clamp(0.0, 1.0);
+    final baseDecay = _touching ? _kTrailDecay : _kTrailDecay * 6.0;
+
+    if (_touching) {
+      // While dragging: uniform decay
+      for (final p in trail) {
+        p.age = (p.age + dt * baseDecay).clamp(0.0, 1.0);
+      }
+    } else {
+      // After release: tail dies first, head lingers last
+      // i=0 in draw loop = newest (head), i=_kTrailLen-1 = oldest (tail)
+      for (int i = 0; i < _kTrailLen; i++) {
+        // Map draw-loop index to actual trail array index
+        final idx = (_trailHead - 1 - i + _kTrailLen) % _kTrailLen;
+        final p = trail[idx];
+        if (p.age >= 1.0) continue;
+        // trailPos: 0.0=head(newest), 1.0=tail(oldest)
+        final trailPos = i / (_kTrailLen - 1).toDouble();
+        // tail decays 8x faster than head → tail gone first, head lingers
+        final pointDecay = baseDecay * (1.0 + trailPos * 7.0);
+        p.age = (p.age + dt * pointDecay).clamp(0.0, 1.0);
+      }
     }
   }
 
@@ -169,13 +187,10 @@ class FluidPainter extends CustomPainter {
   }
 
   void _drawTrail(Canvas canvas, double fw, double fh) {
+    // One single draw call per point — aura+mid+core baked into one gradient
+    // 3x less GPU work vs separate layers, same visual quality
     const double auraFrac = 0.28;
-    const double midFrac  = 0.13;
-    const double coreFrac = 0.045;
-
     final auraR = fh * auraFrac;
-    final midR  = fh * midFrac;
-    final coreR = fh * coreFrac;
 
     for (int i = FluidEngine._kTrailLen - 1; i >= 0; i--) {
       final idx = (engine.trailHead - 1 - i + FluidEngine._kTrailLen)
@@ -190,45 +205,31 @@ class FluidPainter extends CustomPainter {
       final cx = p.x * fw;
       final cy = p.y * fh;
 
-      canvas.drawCircle(Offset(cx, cy), auraR,
-        Paint()
-          ..blendMode = BlendMode.screen
-          ..shader    = ui.Gradient.radial(
-            Offset(cx, cy), auraR,
-            [
-              Color.fromARGB(_a(op * 0.28), 80,  5, 200),
-              Color.fromARGB(_a(op * 0.10), 55,  3, 150),
-              const Color(0x00000000),
-            ],
-            [0.0, 0.55, 1.0],
-          ),
-      );
+      // Position in trail: 0.0 = newest (head), 1.0 = oldest (tail)
+      final trailPos = i / FluidEngine._kTrailLen.toDouble();
+      // Aggressive taper: head is full size, tail tapers to nothing
+      final radiusMult = pow(1.0 - trailPos, 0.5) as double;
+      final r = auraR * (0.05 + radiusMult * 0.95);
+      // Kill dot artifact: skip any point that is visually too small to look good
+      if (r < auraR * 0.18) continue;
 
-      canvas.drawCircle(Offset(cx, cy), midR,
+      canvas.drawCircle(
+        Offset(cx, cy),
+        r,
         Paint()
           ..blendMode = BlendMode.screen
           ..shader    = ui.Gradient.radial(
-            Offset(cx, cy), midR,
+            Offset(cx, cy),
+            r,
             [
-              Color.fromARGB(_a(op * 0.85), 190, 70, 255),
-              Color.fromARGB(_a(op * 0.30), 120, 20, 230),
-              const Color(0x00000000),
+              Color.fromARGB(_a(op * 1.00), 255, 220, 255), // white-pink core
+              Color.fromARGB(_a(op * 0.90), 220, 100, 255), // bright violet
+              Color.fromARGB(_a(op * 0.55), 160,  40, 255), // mid purple
+              Color.fromARGB(_a(op * 0.20),  70,   5, 200), // deep aura
+              Color.fromARGB(_a(op * 0.08),  40,   0, 140), // outer glow
+              const Color(0x00000000),                       // transparent edge
             ],
-            [0.0, 0.60, 1.0],
-          ),
-      );
-
-      canvas.drawCircle(Offset(cx, cy), coreR,
-        Paint()
-          ..blendMode = BlendMode.screen
-          ..shader    = ui.Gradient.radial(
-            Offset(cx, cy), coreR,
-            [
-              Color.fromARGB(_a(op * 1.0),  248, 210, 255),
-              Color.fromARGB(_a(op * 0.50), 210, 130, 255),
-              const Color(0x00000000),
-            ],
-            [0.0, 0.50, 1.0],
+            [0.0, 0.08, 0.20, 0.45, 0.70, 1.0],
           ),
       );
     }
