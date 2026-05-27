@@ -125,10 +125,6 @@ class FluidEngine {
   void setTouching(bool v)     => _touching = v;
 }
 
-// ---------------------------------------------------------------------------
-// Painter
-// ---------------------------------------------------------------------------
-
 class FluidPainter extends CustomPainter {
   final FluidEngine engine;
   final Size        screenSize;
@@ -147,124 +143,101 @@ class FluidPainter extends CustomPainter {
   }
 
   void _drawTrail(Canvas canvas, double fw, double fh) {
-    final int    len     = FluidEngine._kTrailLen;
-    final int    head    = engine.trailHead;
-    final double baseR   = fh * 0.20; // slightly smaller overall
+    final auraR = fh * 0.22;
 
-    for (int i = len - 1; i >= 0; i--) {
-      final idx = (head - 1 - i + len) % len;
-      final p   = engine.trail[idx];
+    for (int i = FluidEngine._kTrailLen - 1; i >= 0; i--) {
+      final idx = (engine.trailHead - 1 - i + FluidEngine._kTrailLen)
+          % FluidEngine._kTrailLen;
+      final p = engine.trail[idx];
       if (p.age >= 0.97) continue;
 
-      // trailPos: 0.0 = oldest/tail, 1.0 = newest/head
-      final trailPos = i / (len - 1).toDouble();
       final op       = pow(1.0 - p.age, 2.2) as double;
       if (op < 0.01) continue;
 
-      final cx = p.x * fw;
-      final cy = p.y * fh;
+      // trailPos: 0=tail, 1=head
+      final trailPos   = i / FluidEngine._kTrailLen.toDouble();
+      final radiusMult = 0.40 + trailPos * 0.60;
+      final r          = auraR * radiusMult;
+      final cx         = p.x * fw;
+      final cy         = p.y * fh;
 
-      // ── #2 Subtle width pulse — feels alive, not static ─────────────────
-      final pulse     = 1.0 + sin(trailPos * 18.0) * 0.04;
+      // Color temperature: tail=deep indigo → mid=violet → head=hot pink-white
+      // Pink added throughout to make it colorful and warm
+      final pinkMix = 0.30 + trailPos * 0.70; // more pink at head
 
-      // ── #3 Explosive head — tip is 1.45× wider and brighter ─────────────
-      final headBoost = trailPos > 0.85
-          ? 1.0 + (trailPos - 0.85) / 0.15 * 0.45
-          : 1.0;
-
-      final sizeMult  = (0.35 + trailPos * 0.65) * pulse * headBoost;
-
-      // ── #4 Asymmetric falloff — wide soft halo + tight bright core ───────
-      final haloR = baseR * sizeMult;          // wide outer halo
-      final coreR = baseR * sizeMult * 0.22;   // tight inner core
-
-      // ── #1 Color temperature shift along trail ───────────────────────────
-      // tail: deep indigo → mid: violet-purple → head: hot white-pink
-      final headness = trailPos; // 0=tail, 1=head
-
-      // Halo colors shift indigo → violet → pink
-      final haloR1 = _lerpInt(30,  150, headness);   // red channel
-      final haloG1 = _lerpInt(5,   40,  headness);   // green channel
-      final haloB1 = _lerpInt(180, 255, headness);   // blue channel
-
-      final haloMidR = _lerpInt(80,  210, headness);
-      final haloMidG = _lerpInt(10,  80,  headness);
-      final haloMidB = _lerpInt(220, 255, headness);
-
-      // Pass 1: Wide outer halo — transparent center blooms at ~20% radius
       canvas.drawCircle(
-        Offset(cx, cy), haloR,
+        Offset(cx, cy), r,
         Paint()
           ..blendMode = BlendMode.screen
           ..shader    = ui.Gradient.radial(
-            Offset(cx, cy), haloR,
+            Offset(cx, cy), r,
             [
+              // Center: transparent — no dot accumulation on overlap
               const Color(0x00000000),
-              Color.fromARGB(_a(op * 0.45), haloR1,      haloG1,      haloB1),
-              Color.fromARGB(_a(op * 0.70), haloMidR,    haloMidG,    haloMidB),
-              Color.fromARGB(_a(op * 0.35), haloMidR~/2, haloMidG~/2, haloB1),
+              // Inner ring: pink-violet bloom
+              Color.fromARGB(_a(op * 0.55),
+                _lerp(120, 255, pinkMix),  // R: violet→pink
+                _lerp(0,   80,  pinkMix),  // G: stays low
+                255,                        // B: always full blue-violet
+              ),
+              // Mid: saturated violet-magenta
+              Color.fromARGB(_a(op * 0.85),
+                _lerp(160, 255, pinkMix),
+                _lerp(10,  60,  pinkMix),
+                255,
+              ),
+              // Outer mid: deep purple-indigo
+              Color.fromARGB(_a(op * 0.45),
+                _lerp(60,  180, pinkMix),
+                _lerp(0,   20,  pinkMix),
+                _lerp(200, 255, pinkMix),
+              ),
+              // Edge: fade to transparent
               const Color(0x00000000),
             ],
-            [0.0, 0.18, 0.38, 0.68, 1.0],
-          ),
-      );
-
-      // Pass 2: Tight bright core — white-hot at head, violet at tail
-      final coreHotR = _lerpInt(180, 255, headness);
-      final coreHotG = _lerpInt(60,  210, headness);
-      final coreHotB = 255;
-      final coreOpScale = 0.65 + headness * 0.35; // head glows harder
-
-      canvas.drawCircle(
-        Offset(cx, cy), coreR,
-        Paint()
-          ..blendMode = BlendMode.screen
-          ..shader    = ui.Gradient.radial(
-            Offset(cx, cy), coreR,
-            [
-              Color.fromARGB(_a(op * coreOpScale), coreHotR, coreHotG, coreHotB),
-              Color.fromARGB(_a(op * coreOpScale * 0.5), haloMidR, haloMidG, haloMidB),
-              const Color(0x00000000),
-            ],
-            [0.0, 0.55, 1.0],
+            [0.0, 0.12, 0.32, 0.65, 1.0],
           ),
       );
     }
 
-    // ── #3 Extra explosive burst at the very tip (head 4 points) ────────────
-    for (int i = len - 1; i >= len - 5; i--) {
-      if (i < 0) continue;
-      final idx = (head - 1 - i + len) % len;
-      final p   = engine.trail[idx];
-      if (p.age >= 0.90) continue;
+    // Bright silk core — only head region, white-pink, very tight
+    for (int i = FluidEngine._kTrailLen - 1; i >= 0; i--) {
+      final idx = (engine.trailHead - 1 - i + FluidEngine._kTrailLen)
+          % FluidEngine._kTrailLen;
+      final p = engine.trail[idx];
+      if (p.age >= 0.97) continue;
 
-      final op        = pow(1.0 - p.age, 1.8) as double;
-      final trailPos  = i / (len - 1).toDouble();
-      final burstStr  = (trailPos - 0.80) / 0.20; // 0→1 over last 4 pts
-      final burstR    = baseR * 0.55 * burstStr;
+      final trailPos = i / FluidEngine._kTrailLen.toDouble();
+      if (trailPos < 0.35) continue; // only head 65%
 
+      final coreStr = ((trailPos - 0.35) / 0.65).clamp(0.0, 1.0);
+      final op      = (pow(1.0 - p.age, 2.2) as double) * coreStr;
+      if (op < 0.015) continue;
+
+      final r  = auraR * 0.09 * (0.4 + trailPos * 0.6);
       final cx = p.x * fw;
       final cy = p.y * fh;
 
       canvas.drawCircle(
-        Offset(cx, cy), burstR,
+        Offset(cx, cy), r,
         Paint()
           ..blendMode = BlendMode.screen
           ..shader    = ui.Gradient.radial(
-            Offset(cx, cy), burstR,
+            Offset(cx, cy), r,
             [
-              Color.fromARGB(_a(op * 0.90), 255, 230, 255),
-              Color.fromARGB(_a(op * 0.50), 220, 120, 255),
+              Color.fromARGB(_a(op * 1.0), 255, 200, 255), // warm white-pink
+              Color.fromARGB(_a(op * 0.5), 255, 100, 255), // hot pink
               const Color(0x00000000),
             ],
-            [0.0, 0.45, 1.0],
+            [0.0, 0.5, 1.0],
           ),
       );
     }
   }
 
   static int _a(double v) => (v * 255).clamp(0, 255).toInt();
-  static int _lerpInt(int a, int b, double t) => (a + (b - a) * t).round().clamp(0, 255);
+  static int _lerp(int a, int b, double t) =>
+      (a + (b - a) * t).round().clamp(0, 255);
 
   @override
   bool shouldRepaint(FluidPainter old) => true;

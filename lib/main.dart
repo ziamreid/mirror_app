@@ -1,6 +1,7 @@
 import 'dart:math';
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'fluid_painter.dart';
@@ -51,6 +52,9 @@ class _FluidScreenState extends State<FluidScreen>
   final _repaint = ValueNotifier<int>(0);
   bool _physicsRunning = false;
 
+  // Single-finger lock — ignore any pointer that isn't the first one down
+  int? _activePointer;
+
   @override
   void initState() {
     super.initState();
@@ -83,10 +87,14 @@ class _FluidScreenState extends State<FluidScreen>
     });
   }
 
-  void _onPanStart(DragStartDetails d) {
+  void _onPointerDown(PointerDownEvent e) {
+    // Lock to first finger only
+    if (_activePointer != null) return;
+    _activePointer = e.pointer;
+
     if (_size == Size.zero) return;
-    final nx = d.localPosition.dx / _size.width;
-    final ny = d.localPosition.dy / _size.height;
+    final nx = e.localPosition.dx / _size.width;
+    final ny = e.localPosition.dy / _size.height;
     final as = _size.width / _size.height;
     _engine.setTouching(true);
     _engine.resetTrail(nx, ny);
@@ -104,13 +112,14 @@ class _FluidScreenState extends State<FluidScreen>
     }
   }
 
-  void _onPanUpdate(DragUpdateDetails d) {
+  void _onPointerMove(PointerMoveEvent e) {
+    if (e.pointer != _activePointer) return;
     if (_size == Size.zero) return;
-    final nx = d.localPosition.dx / _size.width;
-    final ny = d.localPosition.dy / _size.height;
+    final nx = e.localPosition.dx / _size.width;
+    final ny = e.localPosition.dy / _size.height;
     final as = _size.width / _size.height;
-    final vx = d.delta.dx / _size.width;
-    final vy = d.delta.dy / _size.height;
+    final vx = e.delta.dx / _size.width;
+    final vy = e.delta.dy / _size.height;
     _engine.setTouch(Offset(nx, ny));
     final prev = _engine.velocity;
     _engine.setVelocity(Offset(
@@ -122,22 +131,31 @@ class _FluidScreenState extends State<FluidScreen>
     _engine.velocityField.addForce(nx, ny, vx * 22.0, vy * 22.0, aspect: as);
   }
 
-  void _onPanEnd(DragEndDetails d) {
+  void _onPointerUp(PointerUpEvent e) {
+    if (e.pointer != _activePointer) return;
+    _activePointer = null;
+
     if (_size == Size.zero) return;
-    final pv = d.velocity.pixelsPerSecond;
+    final pv = e.delta; // approximate — use velocity from engine
     final as = _size.width / _size.height;
     _engine.setTouching(false);
-    // Option C: assign per-point drift (comet head + turbulent tail)
-    _engine.assignDriftOnRelease(pv, _size);
+    // Use last known engine velocity scaled to pixel velocity
+    final ev = _engine.velocity;
+    final pixVel = Offset(
+      ev.dx * _size.width  * 60.0,
+      ev.dy * _size.height * 60.0,
+    );
+    _engine.assignDriftOnRelease(pixVel, _size);
     _engine.velocityField.addForce(
       _engine.touch.dx, _engine.touch.dy,
-      pv.dx * 0.0008, pv.dy * 0.0008, aspect: as,
+      ev.dx * 0.5, ev.dy * 0.5, aspect: as,
     );
-    final ev = _engine.velocity;
-    _engine.setVelocity(Offset(
-      ev.dx * 0.5 + pv.dx * 0.0006,
-      ev.dy * 0.5 + pv.dy * 0.0006,
-    ));
+  }
+
+  void _onPointerCancel(PointerCancelEvent e) {
+    if (e.pointer != _activePointer) return;
+    _activePointer = null;
+    _engine.setTouching(false);
   }
 
   @override
@@ -152,10 +170,11 @@ class _FluidScreenState extends State<FluidScreen>
     _size = MediaQuery.of(context).size;
     return Scaffold(
       backgroundColor: Colors.black,
-      body: GestureDetector(
-        onPanStart:  _onPanStart,
-        onPanUpdate: _onPanUpdate,
-        onPanEnd:    _onPanEnd,
+      body: Listener(
+        onPointerDown:   _onPointerDown,
+        onPointerMove:   _onPointerMove,
+        onPointerUp:     _onPointerUp,
+        onPointerCancel: _onPointerCancel,
         child: RepaintBoundary(
           child: ValueListenableBuilder<int>(
             valueListenable: _repaint,
