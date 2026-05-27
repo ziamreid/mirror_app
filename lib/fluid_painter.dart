@@ -15,9 +15,9 @@ class TrailPoint {
 }
 
 class FluidEngine {
-  static const int    _kTrailLen   = 120;
+  static const int    _kTrailLen   = 60;
   static const double _kTrailDecay = 0.055;
-  static const double _kMinDist    = 0.009;
+  static const double _kMinDist    = 0.014;
 
   Offset _touch      = const Offset(0.5, 0.5);
   Offset _lastPush   = const Offset(-1, -1);
@@ -209,9 +209,9 @@ class FluidPainter extends CustomPainter {
       final trailPos = i / FluidEngine._kTrailLen.toDouble();
       // Aggressive taper: head is full size, tail tapers to nothing
       final radiusMult = pow(1.0 - trailPos, 0.5) as double;
-      final r = auraR * (0.05 + radiusMult * 0.95);
+      final r = auraR * (0.35 + radiusMult * 0.65);
       // Kill dot artifact: skip any point that is visually too small to look good
-      if (r < auraR * 0.18) continue;
+      if (r < auraR * 0.30) continue;
 
       canvas.drawCircle(
         Offset(cx, cy),
