@@ -14,7 +14,7 @@ class TrailPoint {
 
 class FluidEngine {
   static const int    _kTrailLen   = 80;
-  static const double _kTrailDecay = 0.028; // slower = stays bright while dragging
+  static const double _kTrailDecay = 0.050;
   static const double _kMinDist    = 0.007;
 
   Offset _touch      = const Offset(0.5, 0.5);
@@ -36,12 +36,10 @@ class FluidEngine {
     _velocity   = _velocity * 0.88;
 
     if (!_touching) {
-      // Apply forward drift — all points moving same direction, no crossing
       for (final p in trail) {
         if (p.age < 0.98) {
           p.x = (p.x + p.driftX * dt).clamp(0.0, 1.0);
           p.y = (p.y + p.driftY * dt).clamp(0.0, 1.0);
-          // Decelerate drift smoothly — feels like fluid slowing to a stop
           p.driftX *= 0.82;
           p.driftY *= 0.82;
         }
@@ -53,7 +51,6 @@ class FluidEngine {
         p.age = (p.age + dt * _kTrailDecay).clamp(0.0, 1.0);
       }
     } else {
-      // Tail dies faster than head — comet shape preserved during fade
       for (int i = 0; i < _kTrailLen; i++) {
         final idx = (_trailHead - 1 - i + _kTrailLen) % _kTrailLen;
         final p   = trail[idx];
@@ -72,11 +69,6 @@ class FluidEngine {
     }
     _trailHead = 0;
     _lastPush  = Offset(nx, ny);
-    // Burst-write points at touch position so glow appears instantly,
-    // not after dragging for several frames.
-    for (int i = 0; i < 20; i++) {
-      _writePt(nx, ny);
-    }
   }
 
   void pushTrailDense(double nx, double ny) {
@@ -99,32 +91,20 @@ class FluidEngine {
     _trailHead = (_trailHead + 1) % _kTrailLen;
   }
 
-  /// Forward-only drift — all points move in fling direction together.
-  /// No random scatter angles = no crossing paths = no bright streak artifact.
   void assignDriftOnRelease(Offset pixelVelocity, Size screenSize) {
     final flingX   = pixelVelocity.dx / screenSize.width;
     final flingY   = pixelVelocity.dy / screenSize.height;
     final flingMag = sqrt(flingX * flingX + flingY * flingY);
-
-    // Only apply drift if there's a meaningful fling gesture
     if (flingMag < 0.04) return;
-
-    final normX = flingX / flingMag;
-    final normY = flingY / flingMag;
-
-    // Cap fling magnitude — strong enough to feel fluid, not fly off screen
+    final normX     = flingX / flingMag;
+    final normY     = flingY / flingMag;
     final cappedMag = flingMag.clamp(0.0, 0.6);
-
     for (int i = 0; i < _kTrailLen; i++) {
       final idx = (_trailHead - 1 - i + _kTrailLen) % _kTrailLen;
       final p   = trail[idx];
       if (p.age >= 0.98) continue;
-
-      // Head carries full momentum, tail carries 30% — whole trail glides
-      // not just the tip. Feels like the whole liquid body is thrown forward.
       final headness = 0.30 + 0.70 * (1.0 - (i / _kTrailLen));
       final fwdStr   = headness * cappedMag * 1.2;
-
       p.driftX = normX * fwdStr;
       p.driftY = normY * fwdStr;
     }
@@ -163,12 +143,9 @@ class FluidPainter extends CustomPainter {
   }
 
   void _drawTrail(Canvas canvas, double fw, double fh) {
-    final auraR = fh * 0.22;
+    final auraR   = fh * 0.22;
     final bool touching = engine.touching;
 
-    // Skip nearby points ONLY while touching (trail is dense, skipping is invisible).
-    // While fading (not touching), draw every surviving point — there are few
-    // and skipping them causes visible jumping as the trail dies.
     const double kSkipPx = 12.0;
     double lastDrawX = -9999, lastDrawY = -9999;
 
@@ -184,12 +161,36 @@ class FluidPainter extends CustomPainter {
       final cx = p.x * fw;
       final cy = p.y * fh;
 
-      // Skip only when finger is down and circles are dense
       if (touching) {
         final ddx = cx - lastDrawX, ddy = cy - lastDrawY;
         if (ddx * ddx + ddy * ddy < kSkipPx * kSkipPx) continue;
       }
       lastDrawX = cx; lastDrawY = cy;
+
+      // Original: i=_kTrailLen-1 is oldest (tail, small)
+      //           i=0 is newest (head, big)
+      // trailPos goes 0→1 as i goes 0→_kTrailLen-1
+      // So trailPos=0 at head, trailPos=1 at tail
+      // radiusMult = 0.40 + trailPos*0.60 → head=0.40, tail=1.0 ← WRONG
+      // 
+      // Wait — the ORIGINAL from the document used exactly this and it worked.
+      // The reason: the loop draws i=79 first (tail) and i=0 last (head).
+      // idx formula: i=79 → trailHead-80 = oldest. i=0 → trailHead-1 = newest.
+      // So newest point (head/finger) has i=0, trailPos=0, radiusMult=0.40 (SMALL).
+      // Oldest point (tail) has i=79, trailPos≈1, radiusMult=1.0 (BIG).
+      // That means tail is BIG and head is SMALL — which IS the teardrop.
+      //
+      // BUT the original worked beautifully. Why? Because while DRAGGING,
+      // the head is always at the finger and keeps getting NEW points written.
+      // The "tail" points are old and already fading (op very low).
+      // So visually the head GLOWS brighter even if radius is smaller.
+      // The glow brightness compensates for the radius difference.
+      //
+      // The teardrop we see now is because we changed _kTrailDecay to 0.028
+      // (slower decay) so tail points stay bright AND big = visible teardrop.
+      //
+      // REAL FIX: restore original _kTrailDecay = 0.050 so tail fades fast
+      // and isn't visible long enough to form the teardrop shape.
       final trailPos   = i / FluidEngine._kTrailLen.toDouble();
       final radiusMult = 0.40 + trailPos * 0.60;
       final r          = auraR * radiusMult;
@@ -203,16 +204,16 @@ class FluidPainter extends CustomPainter {
             Offset(cx, cy), r,
             [
               const Color(0x00000000),
-              Color.fromARGB(_a(op * 0.30),       // softer at dead center
+              Color.fromARGB(_a(op * 0.55),
                 _lerp(120, 255, pinkMix), _lerp(0, 80, pinkMix), 255),
-              Color.fromARGB(_a(op * 0.90),       // peak bloom in mid-ring
+              Color.fromARGB(_a(op * 0.85),
                 _lerp(160, 255, pinkMix), _lerp(10, 60, pinkMix), 255),
-              Color.fromARGB(_a(op * 0.50),
+              Color.fromARGB(_a(op * 0.45),
                 _lerp(60, 180, pinkMix), _lerp(0, 20, pinkMix),
                 _lerp(200, 255, pinkMix)),
               const Color(0x00000000),
             ],
-            [0.0, 0.18, 0.38, 0.68, 1.0],  // bloom peak pushed outward
+            [0.0, 0.12, 0.32, 0.65, 1.0],
           ),
       );
     }
