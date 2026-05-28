@@ -143,8 +143,8 @@ class FluidPainter extends CustomPainter {
   }
 
   void _drawTrail(Canvas canvas, double fw, double fh) {
-    final auraR   = fh * 0.22;
-    final bool touching = engine.touching;
+    final auraR    = fh * 0.22;
+    final touching = engine.touching;
 
     const double kSkipPx = 12.0;
     double lastDrawX = -9999, lastDrawY = -9999;
@@ -167,35 +167,16 @@ class FluidPainter extends CustomPainter {
       }
       lastDrawX = cx; lastDrawY = cy;
 
-      // Original: i=_kTrailLen-1 is oldest (tail, small)
-      //           i=0 is newest (head, big)
-      // trailPos goes 0→1 as i goes 0→_kTrailLen-1
-      // So trailPos=0 at head, trailPos=1 at tail
-      // radiusMult = 0.40 + trailPos*0.60 → head=0.40, tail=1.0 ← WRONG
-      // 
-      // Wait — the ORIGINAL from the document used exactly this and it worked.
-      // The reason: the loop draws i=79 first (tail) and i=0 last (head).
-      // idx formula: i=79 → trailHead-80 = oldest. i=0 → trailHead-1 = newest.
-      // So newest point (head/finger) has i=0, trailPos=0, radiusMult=0.40 (SMALL).
-      // Oldest point (tail) has i=79, trailPos≈1, radiusMult=1.0 (BIG).
-      // That means tail is BIG and head is SMALL — which IS the teardrop.
-      //
-      // BUT the original worked beautifully. Why? Because while DRAGGING,
-      // the head is always at the finger and keeps getting NEW points written.
-      // The "tail" points are old and already fading (op very low).
-      // So visually the head GLOWS brighter even if radius is smaller.
-      // The glow brightness compensates for the radius difference.
-      //
-      // The teardrop we see now is because we changed _kTrailDecay to 0.028
-      // (slower decay) so tail points stay bright AND big = visible teardrop.
-      //
-      // REAL FIX: restore original _kTrailDecay = 0.050 so tail fades fast
-      // and isn't visible long enough to form the teardrop shape.
       final trailPos   = i / FluidEngine._kTrailLen.toDouble();
       final radiusMult = 0.40 + trailPos * 0.60;
       final r          = auraR * radiusMult;
       final pinkMix    = 0.30 + trailPos * 0.70;
 
+      // Gradient peak pushed outward (0.35–0.58 instead of 0.12–0.32).
+      // Each circle is now a bright RING with a soft transparent center.
+      // When many rings stack along the finger path, their centers are dim
+      // and their bright bands overlap into a smooth uniform cloud —
+      // no visible spine, no line artifact, no positional trickery needed.
       canvas.drawCircle(
         Offset(cx, cy), r,
         Paint()
@@ -204,16 +185,16 @@ class FluidPainter extends CustomPainter {
             Offset(cx, cy), r,
             [
               const Color(0x00000000),
-              Color.fromARGB(_a(op * 0.55),
+              Color.fromARGB(_a(op * 0.18),
                 _lerp(120, 255, pinkMix), _lerp(0, 80, pinkMix), 255),
-              Color.fromARGB(_a(op * 0.85),
+              Color.fromARGB(_a(op * 0.52),
                 _lerp(160, 255, pinkMix), _lerp(10, 60, pinkMix), 255),
-              Color.fromARGB(_a(op * 0.45),
-                _lerp(60, 180, pinkMix), _lerp(0, 20, pinkMix),
+              Color.fromARGB(_a(op * 0.38),
+                _lerp(100, 220, pinkMix), _lerp(0, 40, pinkMix),
                 _lerp(200, 255, pinkMix)),
               const Color(0x00000000),
             ],
-            [0.0, 0.12, 0.32, 0.65, 1.0],
+            [0.0, 0.28, 0.52, 0.78, 1.0],
           ),
       );
     }
