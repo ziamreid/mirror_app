@@ -98,7 +98,6 @@ class FluidEngine {
     final hasFling = flingMag > 0.05;
     final normX    = hasFling ? flingX / flingMag : 0.0;
     final normY    = hasFling ? flingY / flingMag : 0.0;
-
     for (int i = 0; i < _kTrailLen; i++) {
       final idx = (_trailHead - 1 - i + _kTrailLen) % _kTrailLen;
       final p   = trail[idx];
@@ -151,20 +150,17 @@ class FluidPainter extends CustomPainter {
       final p = engine.trail[idx];
       if (p.age >= 0.97) continue;
 
-      final op       = pow(1.0 - p.age, 2.2) as double;
+      final op = pow(1.0 - p.age, 2.2) as double;
       if (op < 0.01) continue;
 
-      // trailPos: 0=tail, 1=head
+      final cx         = p.x * fw;
+      final cy         = p.y * fh;
       final trailPos   = i / FluidEngine._kTrailLen.toDouble();
       final radiusMult = 0.40 + trailPos * 0.60;
       final r          = auraR * radiusMult;
-      final cx         = p.x * fw;
-      final cy         = p.y * fh;
+      final pinkMix    = 0.30 + trailPos * 0.70;
 
-      // Color temperature: tail=deep indigo → mid=violet → head=hot pink-white
-      // Pink added throughout to make it colorful and warm
-      final pinkMix = 0.30 + trailPos * 0.70; // more pink at head
-
+      // Single pass — no separate core circle = no isolated dot on release
       canvas.drawCircle(
         Offset(cx, cy), r,
         Paint()
@@ -172,64 +168,17 @@ class FluidPainter extends CustomPainter {
           ..shader    = ui.Gradient.radial(
             Offset(cx, cy), r,
             [
-              // Center: transparent — no dot accumulation on overlap
               const Color(0x00000000),
-              // Inner ring: pink-violet bloom
               Color.fromARGB(_a(op * 0.55),
-                _lerp(120, 255, pinkMix),  // R: violet→pink
-                _lerp(0,   80,  pinkMix),  // G: stays low
-                255,                        // B: always full blue-violet
-              ),
-              // Mid: saturated violet-magenta
+                _lerp(120, 255, pinkMix), _lerp(0, 80, pinkMix), 255),
               Color.fromARGB(_a(op * 0.85),
-                _lerp(160, 255, pinkMix),
-                _lerp(10,  60,  pinkMix),
-                255,
-              ),
-              // Outer mid: deep purple-indigo
+                _lerp(160, 255, pinkMix), _lerp(10, 60, pinkMix), 255),
               Color.fromARGB(_a(op * 0.45),
-                _lerp(60,  180, pinkMix),
-                _lerp(0,   20,  pinkMix),
-                _lerp(200, 255, pinkMix),
-              ),
-              // Edge: fade to transparent
+                _lerp(60, 180, pinkMix), _lerp(0, 20, pinkMix),
+                _lerp(200, 255, pinkMix)),
               const Color(0x00000000),
             ],
             [0.0, 0.12, 0.32, 0.65, 1.0],
-          ),
-      );
-    }
-
-    // Bright silk core — only head region, white-pink, very tight
-    for (int i = FluidEngine._kTrailLen - 1; i >= 0; i--) {
-      final idx = (engine.trailHead - 1 - i + FluidEngine._kTrailLen)
-          % FluidEngine._kTrailLen;
-      final p = engine.trail[idx];
-      if (p.age >= 0.97) continue;
-
-      final trailPos = i / FluidEngine._kTrailLen.toDouble();
-      if (trailPos < 0.35) continue; // only head 65%
-
-      final coreStr = ((trailPos - 0.35) / 0.65).clamp(0.0, 1.0);
-      final op      = (pow(1.0 - p.age, 2.2) as double) * coreStr;
-      if (op < 0.015) continue;
-
-      final r  = auraR * 0.09 * (0.4 + trailPos * 0.6);
-      final cx = p.x * fw;
-      final cy = p.y * fh;
-
-      canvas.drawCircle(
-        Offset(cx, cy), r,
-        Paint()
-          ..blendMode = BlendMode.screen
-          ..shader    = ui.Gradient.radial(
-            Offset(cx, cy), r,
-            [
-              Color.fromARGB(_a(op * 1.0), 255, 200, 255), // warm white-pink
-              Color.fromARGB(_a(op * 0.5), 255, 100, 255), // hot pink
-              const Color(0x00000000),
-            ],
-            [0.0, 0.5, 1.0],
           ),
       );
     }

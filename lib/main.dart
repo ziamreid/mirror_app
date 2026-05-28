@@ -49,11 +49,9 @@ class _FluidScreenState extends State<FluidScreen>
   Size   _size  = Size.zero;
 
   final FluidEngine _engine = FluidEngine();
-  final _repaint = ValueNotifier<int>(0);
-  bool _physicsRunning = false;
-
-  // Single-finger lock — ignore any pointer that isn't the first one down
-  int? _activePointer;
+  final _repaint            = ValueNotifier<int>(0);
+  bool  _physicsRunning     = false;
+  int?  _activePointer;
 
   @override
   void initState() {
@@ -88,10 +86,8 @@ class _FluidScreenState extends State<FluidScreen>
   }
 
   void _onPointerDown(PointerDownEvent e) {
-    // Lock to first finger only
-    if (_activePointer != null) return;
+    if (_activePointer != null) return; // lock to first finger only
     _activePointer = e.pointer;
-
     if (_size == Size.zero) return;
     final nx = e.localPosition.dx / _size.width;
     final ny = e.localPosition.dy / _size.height;
@@ -103,10 +99,8 @@ class _FluidScreenState extends State<FluidScreen>
     _engine.setTouchBurst(1.0);
     _engine.setVelocity(Offset.zero);
     for (final dir in [
-      const Offset( 0.10,  0.00),
-      const Offset(-0.10,  0.00),
-      const Offset( 0.00,  0.10),
-      const Offset( 0.00, -0.10),
+      const Offset( 0.10, 0.00), const Offset(-0.10, 0.00),
+      const Offset( 0.00, 0.10), const Offset( 0.00,-0.10),
     ]) {
       _engine.velocityField.addForce(nx, ny, dir.dx, dir.dy, aspect: as);
     }
@@ -128,18 +122,16 @@ class _FluidScreenState extends State<FluidScreen>
     ));
     _engine.setTouchForce(1.0);
     _engine.pushTrailDense(nx, ny);
-    _engine.velocityField.addForce(nx, ny, vx * 22.0, vy * 22.0, aspect: as);
+    // Increased force multiplier: 22 → 38 for explosive fluid spread
+    _engine.velocityField.addForce(nx, ny, vx * 38.0, vy * 38.0, aspect: as);
   }
 
   void _onPointerUp(PointerUpEvent e) {
     if (e.pointer != _activePointer) return;
     _activePointer = null;
-
     if (_size == Size.zero) return;
-    final pv = e.delta; // approximate — use velocity from engine
     final as = _size.width / _size.height;
     _engine.setTouching(false);
-    // Use last known engine velocity scaled to pixel velocity
     final ev = _engine.velocity;
     final pixVel = Offset(
       ev.dx * _size.width  * 60.0,
