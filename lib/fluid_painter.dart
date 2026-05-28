@@ -36,12 +36,14 @@ class FluidEngine {
     _velocity   = _velocity * 0.88;
 
     if (!_touching) {
+      // Apply forward drift — all points moving same direction, no crossing
       for (final p in trail) {
         if (p.age < 0.98) {
           p.x = (p.x + p.driftX * dt).clamp(0.0, 1.0);
           p.y = (p.y + p.driftY * dt).clamp(0.0, 1.0);
-          p.driftX *= 0.88;
-          p.driftY *= 0.88;
+          // Decelerate drift smoothly — feels like fluid slowing to a stop
+          p.driftX *= 0.82;
+          p.driftY *= 0.82;
         }
       }
     }
@@ -51,6 +53,7 @@ class FluidEngine {
         p.age = (p.age + dt * _kTrailDecay).clamp(0.0, 1.0);
       }
     } else {
+      // Tail dies faster than head — comet shape preserved during fade
       for (int i = 0; i < _kTrailLen; i++) {
         final idx = (_trailHead - 1 - i + _kTrailLen) % _kTrailLen;
         final p   = trail[idx];
@@ -91,23 +94,34 @@ class FluidEngine {
     _trailHead = (_trailHead + 1) % _kTrailLen;
   }
 
+  /// Forward-only drift — all points move in fling direction together.
+  /// No random scatter angles = no crossing paths = no bright streak artifact.
   void assignDriftOnRelease(Offset pixelVelocity, Size screenSize) {
     final flingX   = pixelVelocity.dx / screenSize.width;
     final flingY   = pixelVelocity.dy / screenSize.height;
     final flingMag = sqrt(flingX * flingX + flingY * flingY);
-    final hasFling = flingMag > 0.05;
-    final normX    = hasFling ? flingX / flingMag : 0.0;
-    final normY    = hasFling ? flingY / flingMag : 0.0;
+
+    // Only apply drift if there's a meaningful fling gesture
+    if (flingMag < 0.04) return;
+
+    final normX = flingX / flingMag;
+    final normY = flingY / flingMag;
+
+    // Cap fling magnitude — strong enough to feel fluid, not fly off screen
+    final cappedMag = flingMag.clamp(0.0, 0.6);
+
     for (int i = 0; i < _kTrailLen; i++) {
       final idx = (_trailHead - 1 - i + _kTrailLen) % _kTrailLen;
       final p   = trail[idx];
       if (p.age >= 0.98) continue;
-      final norm    = i / _kTrailLen;
-      final fwdStr  = (1.0 - norm) * (hasFling ? flingMag * 0.5 : 0.0);
-      final scatStr = norm * 0.06;
-      final angle   = _rng.nextDouble() * 2 * pi;
-      p.driftX = normX * fwdStr + cos(angle) * scatStr;
-      p.driftY = normY * fwdStr + sin(angle) * scatStr;
+
+      // Head carries full momentum, tail carries 30% — whole trail glides
+      // not just the tip. Feels like the whole liquid body is thrown forward.
+      final headness = 0.30 + 0.70 * (1.0 - (i / _kTrailLen));
+      final fwdStr   = headness * cappedMag * 1.2;
+
+      p.driftX = normX * fwdStr;
+      p.driftY = normY * fwdStr;
     }
   }
 
@@ -122,6 +136,7 @@ class FluidEngine {
   void setTouchForce(double f) => _touchForce = f;
   void setTouchBurst(double b) => _touchBurst = b;
   void setTouching(bool v)     => _touching = v;
+  void setLastPush(double x, double y) => _lastPush = Offset(x, y);
 }
 
 class FluidPainter extends CustomPainter {
@@ -160,7 +175,6 @@ class FluidPainter extends CustomPainter {
       final r          = auraR * radiusMult;
       final pinkMix    = 0.30 + trailPos * 0.70;
 
-      // Single pass — no separate core circle = no isolated dot on release
       canvas.drawCircle(
         Offset(cx, cy), r,
         Paint()
@@ -169,16 +183,16 @@ class FluidPainter extends CustomPainter {
             Offset(cx, cy), r,
             [
               const Color(0x00000000),
-              Color.fromARGB(_a(op * 0.55),
+              Color.fromARGB(_a(op * 0.30),       // softer at dead center
                 _lerp(120, 255, pinkMix), _lerp(0, 80, pinkMix), 255),
-              Color.fromARGB(_a(op * 0.85),
+              Color.fromARGB(_a(op * 0.90),       // peak bloom in mid-ring
                 _lerp(160, 255, pinkMix), _lerp(10, 60, pinkMix), 255),
-              Color.fromARGB(_a(op * 0.45),
+              Color.fromARGB(_a(op * 0.50),
                 _lerp(60, 180, pinkMix), _lerp(0, 20, pinkMix),
                 _lerp(200, 255, pinkMix)),
               const Color(0x00000000),
             ],
-            [0.0, 0.12, 0.32, 0.65, 1.0],
+            [0.0, 0.18, 0.38, 0.68, 1.0],  // bloom peak pushed outward
           ),
       );
     }

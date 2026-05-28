@@ -53,6 +53,9 @@ class _FluidScreenState extends State<FluidScreen>
   bool  _physicsRunning     = false;
   int?  _activePointer;
 
+  // Track velocity for fling on release
+  Offset _lastMoveVelocity = Offset.zero;
+
   @override
   void initState() {
     super.initState();
@@ -92,18 +95,16 @@ class _FluidScreenState extends State<FluidScreen>
     final nx = e.localPosition.dx / _size.width;
     final ny = e.localPosition.dy / _size.height;
     final as = _size.width / _size.height;
-    _engine.setTouching(true);
+
+    // Reset trail instantly — clean single trail, no overlap blobs
     _engine.resetTrail(nx, ny);
+    _engine.setTouching(true);
     _engine.setTouch(Offset(nx, ny));
     _engine.setTouchForce(1.0);
     _engine.setTouchBurst(1.0);
     _engine.setVelocity(Offset.zero);
-    for (final dir in [
-      const Offset( 0.10, 0.00), const Offset(-0.10, 0.00),
-      const Offset( 0.00, 0.10), const Offset( 0.00,-0.10),
-    ]) {
-      _engine.velocityField.addForce(nx, ny, dir.dx, dir.dy, aspect: as);
-    }
+    _lastMoveVelocity = Offset.zero;
+    _engine.velocityField.addForce(nx, ny, 0.0, 0.0, aspect: as);
   }
 
   void _onPointerMove(PointerMoveEvent e) {
@@ -114,7 +115,15 @@ class _FluidScreenState extends State<FluidScreen>
     final as = _size.width / _size.height;
     final vx = e.delta.dx / _size.width;
     final vy = e.delta.dy / _size.height;
+
     _engine.setTouch(Offset(nx, ny));
+
+    // Smooth velocity tracking for fling detection
+    _lastMoveVelocity = Offset(
+      _lastMoveVelocity.dx * 0.6 + vx * 0.4,
+      _lastMoveVelocity.dy * 0.6 + vy * 0.4,
+    );
+
     final prev = _engine.velocity;
     _engine.setVelocity(Offset(
       prev.dx * 0.75 + vx * 0.25,
@@ -122,7 +131,6 @@ class _FluidScreenState extends State<FluidScreen>
     ));
     _engine.setTouchForce(1.0);
     _engine.pushTrailDense(nx, ny);
-    // Increased force multiplier: 22 → 38 for explosive fluid spread
     _engine.velocityField.addForce(nx, ny, vx * 38.0, vy * 38.0, aspect: as);
   }
 
@@ -130,24 +138,22 @@ class _FluidScreenState extends State<FluidScreen>
     if (e.pointer != _activePointer) return;
     _activePointer = null;
     if (_size == Size.zero) return;
-    final as = _size.width / _size.height;
+
+    // Convert normalized velocity to pixel velocity for drift calculation
+    final pixelVel = Offset(
+      _lastMoveVelocity.dx * _size.width,
+      _lastMoveVelocity.dy * _size.height,
+    );
+    _engine.assignDriftOnRelease(pixelVel, _size);
     _engine.setTouching(false);
-    final ev = _engine.velocity;
-    final pixVel = Offset(
-      ev.dx * _size.width  * 60.0,
-      ev.dy * _size.height * 60.0,
-    );
-    _engine.assignDriftOnRelease(pixVel, _size);
-    _engine.velocityField.addForce(
-      _engine.touch.dx, _engine.touch.dy,
-      ev.dx * 0.5, ev.dy * 0.5, aspect: as,
-    );
+    _lastMoveVelocity = Offset.zero;
   }
 
   void _onPointerCancel(PointerCancelEvent e) {
     if (e.pointer != _activePointer) return;
     _activePointer = null;
     _engine.setTouching(false);
+    _lastMoveVelocity = Offset.zero;
   }
 
   @override
