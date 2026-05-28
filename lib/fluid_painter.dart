@@ -14,7 +14,7 @@ class TrailPoint {
 
 class FluidEngine {
   static const int    _kTrailLen   = 80;
-  static const double _kTrailDecay = 0.050;
+  static const double _kTrailDecay = 0.028; // slower = stays bright while dragging
   static const double _kMinDist    = 0.007;
 
   Offset _touch      = const Offset(0.5, 0.5);
@@ -59,7 +59,7 @@ class FluidEngine {
         final p   = trail[idx];
         if (p.age >= 1.0) continue;
         final trailPos   = i / (_kTrailLen - 1).toDouble();
-        final pointDecay = _kTrailDecay * 4.0 * (1.0 + trailPos * 3.5);
+        final pointDecay = _kTrailDecay * 10.0 * (1.0 + trailPos * 5.0);
         p.age = (p.age + dt * pointDecay).clamp(0.0, 1.0);
       }
     }
@@ -72,6 +72,11 @@ class FluidEngine {
     }
     _trailHead = 0;
     _lastPush  = Offset(nx, ny);
+    // Burst-write points at touch position so glow appears instantly,
+    // not after dragging for several frames.
+    for (int i = 0; i < 20; i++) {
+      _writePt(nx, ny);
+    }
   }
 
   void pushTrailDense(double nx, double ny) {
@@ -126,6 +131,7 @@ class FluidEngine {
   }
 
   int    get trailHead  => _trailHead;
+  bool   get touching   => _touching;
   Offset get touch      => _touch;
   Offset get velocity   => _velocity;
   double get touchForce => _touchForce;
@@ -158,6 +164,13 @@ class FluidPainter extends CustomPainter {
 
   void _drawTrail(Canvas canvas, double fw, double fh) {
     final auraR = fh * 0.22;
+    final bool touching = engine.touching;
+
+    // Skip nearby points ONLY while touching (trail is dense, skipping is invisible).
+    // While fading (not touching), draw every surviving point — there are few
+    // and skipping them causes visible jumping as the trail dies.
+    const double kSkipPx = 12.0;
+    double lastDrawX = -9999, lastDrawY = -9999;
 
     for (int i = FluidEngine._kTrailLen - 1; i >= 0; i--) {
       final idx = (engine.trailHead - 1 - i + FluidEngine._kTrailLen)
@@ -168,8 +181,15 @@ class FluidPainter extends CustomPainter {
       final op = pow(1.0 - p.age, 2.2) as double;
       if (op < 0.01) continue;
 
-      final cx         = p.x * fw;
-      final cy         = p.y * fh;
+      final cx = p.x * fw;
+      final cy = p.y * fh;
+
+      // Skip only when finger is down and circles are dense
+      if (touching) {
+        final ddx = cx - lastDrawX, ddy = cy - lastDrawY;
+        if (ddx * ddx + ddy * ddy < kSkipPx * kSkipPx) continue;
+      }
+      lastDrawX = cx; lastDrawY = cy;
       final trailPos   = i / FluidEngine._kTrailLen.toDouble();
       final radiusMult = 0.40 + trailPos * 0.60;
       final r          = auraR * radiusMult;
