@@ -31,7 +31,12 @@ class FluidEngine {
   final VelocityField velocityField = VelocityField();
 
   void tick(double dt) {
-    _touchForce = (_touchForce - dt * 2.0).clamp(0.0, 1.0);
+    if (_touching) {
+      _touchForce = 1.0;
+    } else {
+      _touchForce = (_touchForce - dt * 2.0).clamp(0.0, 1.0);
+    }
+
     _touchBurst = (_touchBurst - dt * 4.0).clamp(0.0, 1.0);
     _velocity   = _velocity * 0.88;
 
@@ -63,12 +68,20 @@ class FluidEngine {
   }
 
   void resetTrail(double nx, double ny) {
+    // Age all points out first
     for (final p in trail) {
       p.x = nx; p.y = ny; p.age = 1.0;
       p.driftX = 0.0; p.driftY = 0.0;
     }
     _trailHead = 0;
     _lastPush  = Offset(nx, ny);
+
+    // Pre-stamp several overlapping points at age=0 so the glow is
+    // immediately full-bright the moment the thumb touches — no build-up delay.
+    for (int i = 0; i < 18; i++) {
+      trail[i] = TrailPoint(nx, ny)..age = 0.0;
+    }
+    _trailHead = 18;
   }
 
   void pushTrailDense(double nx, double ny) {
@@ -143,10 +156,12 @@ class FluidPainter extends CustomPainter {
   }
 
   void _drawTrail(Canvas canvas, double fw, double fh) {
-    final auraR    = fh * 0.22;
-    final touching = engine.touching;
+    // Bigger: 0.14 → 0.19
+    final auraR      = fh * 0.19;
+    final touching   = engine.touching;
+    final touchForce = engine.touchForce;
 
-    const double kSkipPx = 12.0;
+    const double kSkipPx = 16.0;
     double lastDrawX = -9999, lastDrawY = -9999;
 
     for (int i = FluidEngine._kTrailLen - 1; i >= 0; i--) {
@@ -167,16 +182,19 @@ class FluidPainter extends CustomPainter {
       }
       lastDrawX = cx; lastDrawY = cy;
 
-      final trailPos   = i / FluidEngine._kTrailLen.toDouble();
-      final radiusMult = 0.40 + trailPos * 0.60;
-      final r          = auraR * radiusMult;
-      final pinkMix    = 0.30 + trailPos * 0.70;
+      final trailPos = i / FluidEngine._kTrailLen.toDouble();
 
-      // Gradient peak pushed outward (0.35–0.58 instead of 0.12–0.32).
-      // Each circle is now a bright RING with a soft transparent center.
-      // When many rings stack along the finger path, their centers are dim
-      // and their bright bands overlap into a smooth uniform cloud —
-      // no visible spine, no line artifact, no positional trickery needed.
+      // Use touchForce directly (no touching gate) so size shrinks
+      // smoothly after release instead of snapping off instantly.
+      final forceSizeLift = touchForce * 0.25 * trailPos;
+      final radiusMult    = 0.45 + trailPos * 0.55 + forceSizeLift;
+      final r             = auraR * radiusMult;
+      final pinkMix       = 0.30 + trailPos * 0.70;
+      final lift          = touchForce * 0.60;
+
+      // Gradient: first bright stop pulled in to 0.15 (was 0.28).
+      // Eliminates the hollow donut on single-point touch while still
+      // preventing the center-line blowout when circles stack.
       canvas.drawCircle(
         Offset(cx, cy), r,
         Paint()
@@ -185,16 +203,16 @@ class FluidPainter extends CustomPainter {
             Offset(cx, cy), r,
             [
               const Color(0x00000000),
-              Color.fromARGB(_a(op * 0.18),
+              Color.fromARGB(_a(op * 0.10),
                 _lerp(120, 255, pinkMix), _lerp(0, 80, pinkMix), 255),
-              Color.fromARGB(_a(op * 0.52),
+              Color.fromARGB(_a(op * (0.78 + lift)),
                 _lerp(160, 255, pinkMix), _lerp(10, 60, pinkMix), 255),
-              Color.fromARGB(_a(op * 0.38),
+              Color.fromARGB(_a(op * (0.52 + lift * 0.7)),
                 _lerp(100, 220, pinkMix), _lerp(0, 40, pinkMix),
                 _lerp(200, 255, pinkMix)),
               const Color(0x00000000),
             ],
-            [0.0, 0.28, 0.52, 0.78, 1.0],
+            [0.0, 0.25, 0.50, 0.78, 1.0],
           ),
       );
     }
