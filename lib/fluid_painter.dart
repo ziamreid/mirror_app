@@ -13,7 +13,7 @@ class TrailPoint {
 }
 
 class FluidEngine {
-static const int kTrailLen  = 80;
+  static const int kTrailLen  = 80;
   static const double kTrailDecay = 0.035;
   static const double kMinDist    = 0.007;
 
@@ -68,7 +68,7 @@ static const int kTrailLen  = 80;
         final p   = trail[idx];
         if (p.age >= 1.0) continue;
         final trailPos   = i / (kTrailLen - 1).toDouble();
-        final pointDecay =  kTrailDecay * 5.0 * (1.0 + trailPos * 2.5);
+        final pointDecay = kTrailDecay * 5.0 * (1.0 + trailPos * 2.5);
         p.age = (p.age + dt * pointDecay).clamp(0.0, 1.0);
       }
     }
