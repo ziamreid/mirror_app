@@ -71,13 +71,10 @@ class _SplashScreenState extends State<SplashScreen>
     await _bloomCtrl.forward();
     await Future.delayed(const Duration(milliseconds: 1200));
     if (!mounted) return;
-
     _fluidCtrl.setSpeed(1.5);
     setState(() => _showCards = true);
-
     await Future.delayed(const Duration(milliseconds: 100));
     if (!mounted) return;
-
     await _cardsCtrl.forward();
     if (!mounted) return;
     _fluidCtrl.setSpeed(1.0);
@@ -98,9 +95,8 @@ class _SplashScreenState extends State<SplashScreen>
     Future.delayed(const Duration(milliseconds: 650), () {
       if (!mounted) return;
       _fluidCtrl.setSpeed(1.0);
-      Navigator.of(
-        context,
-      ).pushReplacement(_smoothRoute(OnboardingScreen(language: lang)));
+      Navigator.of(context)
+          .pushReplacement(_smoothRoute(OnboardingScreen(language: lang)));
     });
   }
 
@@ -119,7 +115,6 @@ class _SplashScreenState extends State<SplashScreen>
             children: [
               const Spacer(flex: 2),
               if (_showCards) ...[
-                // ── Header ──────────────────────────────────────────────────
                 AnimatedBuilder(
                   animation: _headerAnim,
                   builder: (_, __) => Opacity(
@@ -154,7 +149,6 @@ class _SplashScreenState extends State<SplashScreen>
                   ),
                 ),
                 const SizedBox(height: 20),
-                // ── Cards ───────────────────────────────────────────────────
                 _MaterialCard(
                   progress: _card0,
                   label: 'ENGLISH',
@@ -218,8 +212,6 @@ class _SplashScreenState extends State<SplashScreen>
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Materialising card — orb follows finger EVERYWHERE (no blocked region)
-// ─────────────────────────────────────────────────────────────────────────────
 class _MaterialCard extends StatefulWidget {
   final Animation<double> progress;
   final String label;
@@ -270,7 +262,6 @@ class _MaterialCardState extends State<_MaterialCard>
       duration: const Duration(milliseconds: 800),
     );
     _sweepAnim = CurvedAnimation(parent: _sweep, curve: Curves.easeInOut);
-
     if (widget.hasShimmer) {
       widget.progress.addListener(_onProgressChange);
     }
@@ -285,9 +276,7 @@ class _MaterialCardState extends State<_MaterialCard>
 
   @override
   void dispose() {
-    if (widget.hasShimmer) {
-      widget.progress.removeListener(_onProgressChange);
-    }
+    if (widget.hasShimmer) widget.progress.removeListener(_onProgressChange);
     _press.dispose();
     _sweep.dispose();
     super.dispose();
@@ -355,19 +344,19 @@ class _MaterialCardState extends State<_MaterialCard>
   }
 
   Widget _buildContent() => _CardContent(
-    label: widget.label,
-    sublabel: widget.sublabel,
-    icon: widget.icon,
-    selected: widget.selected,
-    isArabic: widget.isArabic,
-    orbWidget: _orb,
-  );
+        label: widget.label,
+        sublabel: widget.sublabel,
+        icon: widget.icon,
+        selected: widget.selected,
+        isArabic: widget.isArabic,
+        orbWidget: _orb,
+      );
 }
 
-// ── iOS 26 Liquid Glass card ─────────────────────────────────────────────────
+// ── The glass card ────────────────────────────────────────────────────────────
 class _LiquidGlassCard extends StatelessWidget {
   final bool selected;
-  final double shimmer; // 0→1 sweep progress (Franko only)
+  final double shimmer;
   final Widget child;
 
   const _LiquidGlassCard({
@@ -383,12 +372,26 @@ class _LiquidGlassCard extends StatelessWidget {
       child: Stack(
         fit: StackFit.expand,
         children: [
-          // ── Layer 1: blur what's behind ──────────────────────────────────
+          // ── Layer 1: heavy frost blur — fully scatters the orb ───────────
+          // sigma 40 means any orb within ~200px of the card
+          // gets completely diffused across the whole card surface.
+          // The orb becomes a soft glowing mist, not a blob.
           ClipRRect(
             borderRadius: BorderRadius.circular(18),
-            child: Container(color: const Color(0x22ffffff)),
+            child: BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: 40, sigmaY: 40),
+              child: Container(
+                // 0x1A = ~10% white base so the card has slight presence
+                // even when no orb is behind it.
+                // The blur brings in the orb color — we don't need
+                // much fill since the scattered orb light does the work.
+                color: selected
+                    ? const Color(0x22a855f7)
+                    : const Color(0x1AFFFFFF),
+              ),
+            ),
           ),
-          // ── Layer 2: liquid glass body ────────────────────────────────────
+          // ── Layer 2: rim lights, specular, border ─────────────────────────
           CustomPaint(
             painter: _LiquidGlassPainter(selected: selected, shimmer: shimmer),
           ),
@@ -400,94 +403,94 @@ class _LiquidGlassCard extends StatelessWidget {
   }
 }
 
-// ── Liquid glass painter ──────────────────────────────────────────────────────
+// ── Painter ───────────────────────────────────────────────────────────────────
 class _LiquidGlassPainter extends CustomPainter {
   final bool selected;
   final double shimmer;
-
   const _LiquidGlassPainter({required this.selected, required this.shimmer});
 
   @override
   void paint(Canvas canvas, Size size) {
-    final r = 18.0;
     final rect = Rect.fromLTWH(0, 0, size.width, size.height);
-    final rrect = RRect.fromRectAndRadius(rect, Radius.circular(r));
-
-    // ── Body: near-zero fill so orb bleeds through ────────────────────────
-    canvas.drawRRect(
-      rrect,
-      Paint()
-        ..color = selected ? const Color(0x14a855f7) : const Color(0x08FFFFFF),
-    );
+    final rrect = RRect.fromRectAndRadius(rect, const Radius.circular(18));
 
     // ── Shimmer sweep (Franko only) ───────────────────────────────────────
     if (shimmer > 0.0 && shimmer < 1.0) {
       final cx = size.width * (-0.3 + shimmer * 1.6);
       canvas.save();
       canvas.clipRRect(rrect);
-      final shader =
-          LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: const [
-              Color(0x00FFFFFF),
-              Color(0x00FFFFFF),
-              Color(0x20FFFFFF),
-              Color(0x30FFFFFF),
-              Color(0x20FFFFFF),
-              Color(0x00FFFFFF),
-              Color(0x00FFFFFF),
-            ],
-            stops: const [0.0, 0.28, 0.42, 0.50, 0.58, 0.72, 1.0],
-          ).createShader(
-            Rect.fromCenter(
-              center: Offset(cx, size.height / 2),
-              width: 180,
-              height: size.height,
-            ),
-          );
+      final shader = LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: const [
+          Color(0x00FFFFFF), Color(0x00FFFFFF),
+          Color(0x20FFFFFF), Color(0x30FFFFFF),
+          Color(0x20FFFFFF), Color(0x00FFFFFF),
+          Color(0x00FFFFFF),
+        ],
+        stops: const [0.0, 0.28, 0.42, 0.50, 0.58, 0.72, 1.0],
+      ).createShader(Rect.fromCenter(
+        center: Offset(cx, size.height / 2),
+        width: 180,
+        height: size.height,
+      ));
       canvas.drawRRect(rrect, Paint()..shader = shader);
       canvas.restore();
     }
 
-    // ── Top specular highlight (iOS 26 glass edge) ────────────────────────
-    final topHighlight = Paint()
-      ..shader = LinearGradient(
-        begin: Alignment.topCenter,
-        end: Alignment.bottomCenter,
-        colors: const [Color(0x55FFFFFF), Color(0x00FFFFFF)],
-        stops: const [0.0, 1.0],
-      ).createShader(Rect.fromLTWH(0, 0, size.width, 28));
+    // ── Top specular highlight ────────────────────────────────────────────
     canvas.drawRRect(
       RRect.fromRectAndRadius(
-        Rect.fromLTWH(1, 1, size.width - 2, 26),
+        Rect.fromLTWH(1, 1, size.width - 2, 28),
         const Radius.circular(17),
       ),
-      topHighlight,
+      Paint()
+        ..shader = LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: const [Color(0x88FFFFFF), Color(0x00FFFFFF)],
+        ).createShader(Rect.fromLTWH(0, 0, size.width, 30)),
     );
 
-    // ── Outer border: gradient — bright top, fading bottom ────────────────
-    final borderPaint = Paint()
-      ..shader = LinearGradient(
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-        colors: selected
-            ? const [Color(0x88a855f7), Color(0x33a855f7), Color(0x11a855f7)]
-            : const [Color(0x66FFFFFF), Color(0x22FFFFFF), Color(0x08FFFFFF)],
-        stops: const [0.0, 0.5, 1.0],
-      ).createShader(rect)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 0.9;
-    canvas.drawRRect(rrect, borderPaint);
+    // ── Bottom specular ───────────────────────────────────────────────────
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromLTWH(1, size.height - 18, size.width - 2, 16),
+        const Radius.circular(17),
+      ),
+      Paint()
+        ..shader = LinearGradient(
+          begin: Alignment.bottomCenter,
+          end: Alignment.topCenter,
+          colors: const [Color(0x44FFFFFF), Color(0x00FFFFFF)],
+        ).createShader(
+            Rect.fromLTWH(0, size.height - 20, size.width, 20)),
+    );
 
-    // ── Inner border: subtle white inset (gives depth) ────────────────────
+    // ── Outer border ──────────────────────────────────────────────────────
+    canvas.drawRRect(
+      rrect,
+      Paint()
+        ..shader = LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: selected
+              ? const [Color(0xCCa855f7), Color(0x66a855f7), Color(0x11a855f7)]
+              : const [Color(0xAAFFFFFF), Color(0x44FFFFFF), Color(0x0AFFFFFF)],
+          stops: const [0.0, 0.5, 1.0],
+        ).createShader(rect)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.0,
+    );
+
+    // ── Inner inset border ────────────────────────────────────────────────
     canvas.drawRRect(
       RRect.fromRectAndRadius(
         Rect.fromLTWH(1, 1, size.width - 2, size.height - 2),
         const Radius.circular(17),
       ),
       Paint()
-        ..color = const Color(0x0CFFFFFF)
+        ..color = const Color(0x22FFFFFF)
         ..style = PaintingStyle.stroke
         ..strokeWidth = 0.5,
     );
@@ -496,50 +499,6 @@ class _LiquidGlassPainter extends CustomPainter {
   @override
   bool shouldRepaint(_LiquidGlassPainter old) =>
       old.selected != selected || old.shimmer != shimmer;
-}
-
-// ── Shimmer painter — Franko only ─────────────────────────────────────────────
-class _ShimmerPainter extends CustomPainter {
-  final double progress;
-  final bool selected;
-  const _ShimmerPainter({required this.progress, required this.selected});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    if (progress <= 0.0 || progress >= 1.0) return;
-    final cx = size.width * (-0.3 + progress * 1.6);
-    final rect = Rect.fromLTWH(0, 0, size.width, size.height);
-    final rrect = RRect.fromRectAndRadius(rect, const Radius.circular(18));
-    canvas.save();
-    canvas.clipRRect(rrect);
-    final shader =
-        LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: const [
-            Color(0x00FFFFFF),
-            Color(0x00FFFFFF),
-            Color(0x16FFFFFF),
-            Color(0x26FFFFFF),
-            Color(0x16FFFFFF),
-            Color(0x00FFFFFF),
-            Color(0x00FFFFFF),
-          ],
-          stops: const [0.0, 0.28, 0.42, 0.50, 0.58, 0.72, 1.0],
-        ).createShader(
-          Rect.fromCenter(
-            center: Offset(cx, size.height / 2),
-            width: 180,
-            height: size.height,
-          ),
-        );
-    canvas.drawRRect(rrect, Paint()..shader = shader);
-    canvas.restore();
-  }
-
-  @override
-  bool shouldRepaint(_ShimmerPainter old) =>
-      old.progress != progress || old.selected != selected;
 }
 
 // ── Card content ──────────────────────────────────────────────────────────────
@@ -566,39 +525,31 @@ class _CardContent extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 22),
       child: Row(
         children: [
-          SizedBox(
-            width: 28,
-            height: 28,
-            child: icon,
-          ), // no orb inversion on icons
+          SizedBox(width: 28, height: 28, child: icon),
           const SizedBox(width: 14),
           Column(
             mainAxisAlignment: MainAxisAlignment.center,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              orbWidget(
-                Text(
-                  label,
-                  style: TextStyle(
-                    fontFamily: '.SF Pro Rounded',
-                    color: AppTheme.textPrimary,
-                    fontSize: 15,
-                    fontWeight: selected ? FontWeight.w500 : FontWeight.w300,
-                    letterSpacing: isArabic ? 0.5 : 2.4,
-                  ),
+              orbWidget(Text(
+                label,
+                style: TextStyle(
+                  fontFamily: '.SF Pro Rounded',
+                  color: AppTheme.textPrimary,
+                  fontSize: 15,
+                  fontWeight: selected ? FontWeight.w500 : FontWeight.w300,
+                  letterSpacing: isArabic ? 0.5 : 2.4,
                 ),
-              ),
+              )),
               const SizedBox(height: 3),
-              orbWidget(
-                Text(
-                  sublabel,
-                  style: AppTheme.labelStyle.copyWith(
-                    color: AppTheme.textHint,
-                    letterSpacing: isArabic ? 0.3 : 0.6,
-                    fontSize: 10,
-                  ),
+              orbWidget(Text(
+                sublabel,
+                style: AppTheme.labelStyle.copyWith(
+                  color: AppTheme.textHint,
+                  letterSpacing: isArabic ? 0.3 : 0.6,
+                  fontSize: 10,
                 ),
-              ),
+              )),
             ],
           ),
           const Spacer(),
@@ -624,27 +575,24 @@ class _CardContent extends StatelessWidget {
 // Icons
 // ─────────────────────────────────────────────────────────────────────────────
 
-// US Flag — custom painter, unchanged from original
 class _USFlagIcon extends StatelessWidget {
   const _USFlagIcon();
   @override
   Widget build(BuildContext context) => SizedBox(
-    width: 30,
-    height: 20,
-    child: ClipRRect(
-      borderRadius: BorderRadius.circular(2),
-      child: CustomPaint(painter: _USFlagPainter()),
-    ),
-  );
+        width: 30,
+        height: 20,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(2),
+          child: CustomPaint(painter: _USFlagPainter()),
+        ),
+      );
 }
 
 class _USFlagPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size s) {
-    canvas.drawRect(
-      Rect.fromLTWH(0, 0, s.width, s.height),
-      Paint()..color = const Color(0xFFB22234),
-    );
+    canvas.drawRect(Rect.fromLTWH(0, 0, s.width, s.height),
+        Paint()..color = const Color(0xFFB22234));
     final stripeH = s.height / 13;
     final white = Paint()..color = Colors.white;
     for (int i = 1; i < 13; i += 2) {
@@ -652,10 +600,8 @@ class _USFlagPainter extends CustomPainter {
     }
     final cantonW = s.width * 0.40;
     final cantonH = stripeH * 7;
-    canvas.drawRect(
-      Rect.fromLTWH(0, 0, cantonW, cantonH),
-      Paint()..color = const Color(0xFF3C3B6E),
-    );
+    canvas.drawRect(Rect.fromLTWH(0, 0, cantonW, cantonH),
+        Paint()..color = const Color(0xFF3C3B6E));
     final star = Paint()..color = Colors.white;
     const cols = 6;
     const rows = 5;
@@ -663,7 +609,8 @@ class _USFlagPainter extends CustomPainter {
     final sy = cantonH / (rows + 0.5);
     for (int r = 0; r < rows; r++) {
       for (int c = 0; c < cols; c++) {
-        canvas.drawCircle(Offset((c + 0.75) * sx, (r + 0.75) * sy), 0.9, star);
+        canvas.drawCircle(
+            Offset((c + 0.75) * sx, (r + 0.75) * sy), 0.9, star);
       }
     }
   }
@@ -672,15 +619,13 @@ class _USFlagPainter extends CustomPainter {
   bool shouldRepaint(_) => false;
 }
 
-// Franko — merged 3/ع glyph inside ring
 class _FrankoIcon extends StatelessWidget {
   const _FrankoIcon();
   @override
   Widget build(BuildContext context) => SizedBox(
-    width: 26,
-    height: 26,
-    child: CustomPaint(painter: _FrankoGlyphPainter()),
-  );
+      width: 26,
+      height: 26,
+      child: CustomPaint(painter: _FrankoGlyphPainter()));
 }
 
 class _FrankoGlyphPainter extends CustomPainter {
@@ -716,15 +661,13 @@ class _FrankoGlyphPainter extends CustomPainter {
   bool shouldRepaint(_) => false;
 }
 
-// Arabic — simple clean pyramid, colorful golden tones
 class _ArabicIcon extends StatelessWidget {
   const _ArabicIcon();
   @override
   Widget build(BuildContext context) => SizedBox(
-    width: 30,
-    height: 26,
-    child: CustomPaint(painter: _SimplePyramidPainter()),
-  );
+      width: 30,
+      height: 26,
+      child: CustomPaint(painter: _SimplePyramidPainter()));
 }
 
 class _SimplePyramidPainter extends CustomPainter {
@@ -732,17 +675,11 @@ class _SimplePyramidPainter extends CustomPainter {
   void paint(Canvas canvas, Size s) {
     final w = s.width;
     final h = s.height;
+    canvas.drawLine(Offset(0, h * 0.85), Offset(w, h * 0.85),
+        Paint()
+          ..color = const Color(0x55FFD700)
+          ..strokeWidth = 0.8);
 
-    // Ground line
-    canvas.drawLine(
-      Offset(0, h * 0.85),
-      Offset(w, h * 0.85),
-      Paint()
-        ..color = const Color(0x55FFD700)
-        ..strokeWidth = 0.8,
-    );
-
-    // Small left pyramid
     final left = Path()
       ..moveTo(w * 0.02, h * 0.85)
       ..lineTo(w * 0.22, h * 0.52)
@@ -755,65 +692,61 @@ class _SimplePyramidPainter extends CustomPainter {
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
           colors: const [Color(0xFFD4A017), Color(0xFF8B6914)],
-        ).createShader(Rect.fromLTWH(w * 0.02, h * 0.52, w * 0.40, h * 0.33)),
+        ).createShader(
+            Rect.fromLTWH(w * 0.02, h * 0.52, w * 0.40, h * 0.33)),
     );
     canvas.drawPath(
-      left,
-      Paint()
-        ..color = const Color(0xAAFFD700)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 0.7,
-    );
+        left,
+        Paint()
+          ..color = const Color(0xAAFFD700)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 0.7);
 
-    // Large center pyramid
-    final center = Path()
-      ..moveTo(w * 0.20, h * 0.85)
-      ..lineTo(w * 0.50, h * 0.06)
-      ..lineTo(w * 0.80, h * 0.85)
-      ..close();
-
-    // Light face (left)
-    final centerClipLight = Path()
+    final centerLight = Path()
       ..moveTo(w * 0.20, h * 0.85)
       ..lineTo(w * 0.50, h * 0.06)
       ..lineTo(w * 0.50, h * 0.85)
       ..close();
     canvas.drawPath(
-      centerClipLight,
+      centerLight,
       Paint()
         ..shader = LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: const [Color(0xFFFFD700), Color(0xFFB8860B)],
-        ).createShader(Rect.fromLTWH(w * 0.20, h * 0.06, w * 0.60, h * 0.79)),
+        ).createShader(
+            Rect.fromLTWH(w * 0.20, h * 0.06, w * 0.60, h * 0.79)),
     );
 
-    // Shadow face (right)
-    final centerClipShadow = Path()
+    final centerShadow = Path()
       ..moveTo(w * 0.50, h * 0.06)
       ..lineTo(w * 0.80, h * 0.85)
       ..lineTo(w * 0.50, h * 0.85)
       ..close();
     canvas.drawPath(
-      centerClipShadow,
+      centerShadow,
       Paint()
         ..shader = LinearGradient(
           begin: Alignment.topRight,
           end: Alignment.bottomLeft,
           colors: const [Color(0xFF8B6914), Color(0xFF5C440A)],
-        ).createShader(Rect.fromLTWH(w * 0.50, h * 0.06, w * 0.30, h * 0.79)),
+        ).createShader(
+            Rect.fromLTWH(w * 0.50, h * 0.06, w * 0.30, h * 0.79)),
     );
 
+    final outline = Path()
+      ..moveTo(w * 0.20, h * 0.85)
+      ..lineTo(w * 0.50, h * 0.06)
+      ..lineTo(w * 0.80, h * 0.85)
+      ..close();
     canvas.drawPath(
-      center,
+      outline,
       Paint()
         ..color = const Color(0xCCFFD700)
         ..style = PaintingStyle.stroke
         ..strokeWidth = 1.0
         ..strokeJoin = StrokeJoin.miter,
     );
-
-    // Glowing capstone
     canvas.drawCircle(
       Offset(w * 0.50, h * 0.06),
       2.0,
@@ -822,10 +755,7 @@ class _SimplePyramidPainter extends CustomPainter {
         ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 2.0),
     );
     canvas.drawCircle(
-      Offset(w * 0.50, h * 0.06),
-      1.0,
-      Paint()..color = Colors.white,
-    );
+        Offset(w * 0.50, h * 0.06), 1.0, Paint()..color = Colors.white);
   }
 
   @override
@@ -834,10 +764,10 @@ class _SimplePyramidPainter extends CustomPainter {
 
 // ─────────────────────────────────────────────────────────────────────────────
 PageRoute _smoothRoute(Widget page) => PageRouteBuilder(
-  pageBuilder: (_, __, ___) => page,
-  transitionDuration: const Duration(milliseconds: 500),
-  transitionsBuilder: (_, anim, __, child) => FadeTransition(
-    opacity: CurvedAnimation(parent: anim, curve: Curves.easeOut),
-    child: child,
-  ),
-);
+      pageBuilder: (_, __, ___) => page,
+      transitionDuration: const Duration(milliseconds: 500),
+      transitionsBuilder: (_, anim, __, child) => FadeTransition(
+        opacity: CurvedAnimation(parent: anim, curve: Curves.easeOut),
+        child: child,
+      ),
+    );
