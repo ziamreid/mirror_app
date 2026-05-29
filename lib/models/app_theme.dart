@@ -12,10 +12,15 @@ class AppTheme {
   static const Color textSecondary = Color(0x99FFFFFF);
   static const Color textHint      = Color(0x55FFFFFF);
 
-  // ── Glass card — stronger blur so orb softens behind it ──────────────────
+  // ── Font ──────────────────────────────────────────────────────────────────
+  // '.SF Pro Rounded' gives the soft pill-shaped glyphs visible in the
+  // reference screenshot (image 1). Falls back to system sans-serif on Android.
+  static const String _font = '.SF Pro Rounded';
+
+  // ── Glass card ────────────────────────────────────────────────────────────
   static BoxDecoration glassCard({double radius = 20, double opacity = 0.07}) =>
       BoxDecoration(
-        color: Color.fromRGBO(10, 10, 20, 0.55), // dark tinted base
+        color: const Color.fromRGBO(10, 10, 20, 0.55),
         borderRadius: BorderRadius.circular(radius),
         border: Border.all(color: glassBorder, width: 0.8),
       );
@@ -32,9 +37,7 @@ class AppTheme {
         ),
       );
 
-  // ── Typography — SF Pro (iOS default), fallback to system ─────────────────
-  static const String _font = '.SF Pro Display';
-
+  // ── Typography ────────────────────────────────────────────────────────────
   static const TextStyle questionStyle = TextStyle(
     fontFamily: _font,
     color: textPrimary,

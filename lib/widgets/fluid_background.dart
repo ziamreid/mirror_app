@@ -29,6 +29,11 @@ class FluidController {
   void _detach()                         => _state = null;
   void setSpeed(double v) => _state?._targetSpeed = v;
   void setMood(double v)  => _state?._targetMood  = v;
+
+  FluidEngine?        get engine  => _state?._engine;
+  ValueNotifier<int>? get repaint => _state?._repaint;
+
+
 }
 
 // ─── Widget ───────────────────────────────────────────────────────────────────
@@ -48,28 +53,31 @@ class _FluidBackgroundState extends State<FluidBackground>
 
   final FluidEngine _engine = FluidEngine();
   final _repaint            = ValueNotifier<int>(0);
-  bool  _physicsRunning     = false;
-  int?  _activePointer;
-  Offset _lastMoveVelocity  = Offset.zero;
+  int?   _activePointer;
+  Offset _lastMoveVelocity = Offset.zero;
 
-  // ── Idle wander (smooth Perlin-like target following) ─────────────────────
-  double _idleTimer  = 0.0;
-  // Current wander target (normalized 0–1)
-  double _wanderTx   = 0.5;
-  double _wanderTy   = 0.35;
-  // Actual orb position (smoothly follows target)
-  double _orbX       = 0.5;
-  double _orbY       = 0.35;
-  // Time until next new target is chosen
-  double _nextTarget = 0.0;
+  // ── Dual sine oscillator ──────────────────────────────────────────────────
+  double _t  = 0.0;
+  double _wx = 0.22;
+  double _wy = 0.35;
+  double _px = 0.0;
+  double _py = 0.0;
+  double _ax = 0.30;
+  double _ay = 0.22;
+  double _cx = 0.50;
+  double _cy = 0.40;
+  double _tcx= 0.50;
+  double _tcy= 0.40;
+  double _centerTimer = 8.0;
 
-  // ── Teleport (after long idle) ────────────────────────────────────────────
-  double _teleportFade      = 1.0;
-  bool   _teleporting       = false;
-  double _teleportTimer     = 0.0;
-  double _pendingTx         = 0.5;
-  double _pendingTy         = 0.5;
-  double _lastTeleport      = 8.0; // first teleport after 8s
+  double _orbX = 0.50;
+  double _orbY = 0.40;
+
+  // ── Teleport ──────────────────────────────────────────────────────────────
+  double _teleportFade  = 1.0;
+  bool   _teleporting   = false;
+  double _teleportTimer = 0.0;
+  double _nextTeleport  = 20.0;
 
   // ── Speed / mood ──────────────────────────────────────────────────────────
   double _currentSpeed = 1.0;
@@ -77,13 +85,29 @@ class _FluidBackgroundState extends State<FluidBackground>
   double _currentMood  = 0.0;
   double _targetMood   = 0.0;
 
+  int _frameCnt = 0;
+
   @override
   void initState() {
     super.initState();
     widget.controller?._attach(this);
+
+    _wx = 0.20 + _rng.nextDouble() * 0.05;
+    _wy = 0.32 + _rng.nextDouble() * 0.06;
+    _ax = 0.26 + _rng.nextDouble() * 0.08;
+    _ay = 0.18 + _rng.nextDouble() * 0.06;
+
+    _rephaseToPosition(0.50, 0.40);
+    _orbX = 0.50;
+    _orbY = 0.40;
+
+    for (int i = 0; i < FluidEngine.kTrailLen; i++) {
+      _engine.trail[i] = TrailPoint(0.50, 0.40)..age = 0.0;
+    }
+    _engine.trailHeadSet(FluidEngine.kTrailLen - 1);
+
     _ticker = createTicker(_onTick);
     _ticker.start();
-    _pickNewWanderTarget();
   }
 
   @override
@@ -95,64 +119,66 @@ class _FluidBackgroundState extends State<FluidBackground>
     }
   }
 
-  // Pick a wander target safely away from edges
-  void _pickNewWanderTarget() {
-    double nx, ny;
-    int tries = 0;
-    do {
-      nx = 0.18 + _rng.nextDouble() * 0.64;
-      ny = 0.12 + _rng.nextDouble() * 0.45; // keep in upper half of screen
-      tries++;
-    } while (tries < 12 &&
-        (nx - _wanderTx).abs() < 0.15 &&
-        (ny - _wanderTy).abs() < 0.10);
-    _wanderTx = nx;
-    _wanderTy = ny;
-    _nextTarget = 2.5 + _rng.nextDouble() * 2.0; // 2.5–4.5s between targets
+  void _rephaseToPosition(double x, double y) {
+    _cx = x; _cy = y;
+    _tcx = x; _tcy = y;
+    _px = -_wx * _t;
+    _py = -_wy * _t;
+  }
+
+  void _rephaseFromCurrentPosition() {
+    final dxNorm = _ax > 0 ? ((_orbX - _cx) / _ax).clamp(-1.0, 1.0) : 0.0;
+    final dyNorm = _ay > 0 ? ((_orbY - _cy) / _ay).clamp(-1.0, 1.0) : 0.0;
+    _px = asin(dxNorm) - _wx * _t;
+    _py = asin(dyNorm) - _wy * _t;
+  }
+
+  void _driftCenter(double dt) {
+    _centerTimer -= dt;
+    if (_centerTimer <= 0) {
+      _tcx = 0.20 + _rng.nextDouble() * 0.60;
+      _tcy = 0.18 + _rng.nextDouble() * 0.44;
+      _centerTimer = 10.0 + _rng.nextDouble() * 8.0;
+    }
+    _cx += (_tcx - _cx) * dt * 0.06;
+    _cy += (_tcy - _cy) * dt * 0.06;
   }
 
   void _onTick(Duration elapsed) {
     if (_size == Size.zero) return;
-    final t  = elapsed.inMicroseconds / 1_000_000.0;
-    final dt = (t - _prevT).clamp(0.0, 0.032);
-    _prevT   = t;
+    final nowSec = elapsed.inMicroseconds / 1_000_000.0;
+    final dt = (nowSec - _prevT).clamp(0.0, 0.032);
+    _prevT = nowSec;
+    _frameCnt++;
 
-    _currentSpeed += (_targetSpeed - _currentSpeed) * dt * 1.8;
-    _currentMood  += (_targetMood  - _currentMood)  * dt * 1.8;
+    _currentSpeed += (_targetSpeed - _currentSpeed) * dt * 2.5;
+    _currentMood  += (_targetMood  - _currentMood)  * dt * 2.5;
 
     final eff = dt * _currentSpeed;
     _engine.tick(eff);
 
     if (!_engine.touching) {
-      _idleTimer  += dt;
-      _nextTarget -= dt;
-      final as = _size.width / _size.height;
+      _t += dt * _currentSpeed;
+      _driftCenter(dt);
 
-      // Pick a new wander target when timer expires
-      if (_nextTarget <= 0) _pickNewWanderTarget();
-
-      // ── Teleport after 8 s idle ──────────────────────────────────────────
-      if (_idleTimer >= _lastTeleport && !_teleporting) {
+      _nextTeleport -= dt;
+      if (_nextTeleport <= 0 && !_teleporting) {
         _teleporting   = true;
         _teleportTimer = 0.0;
-        _pendingTx     = 0.18 + _rng.nextDouble() * 0.64;
-        _pendingTy     = 0.12 + _rng.nextDouble() * 0.45;
-        _lastTeleport  = _idleTimer + 8.0;
+        _nextTeleport  = 18.0 + _rng.nextDouble() * 10.0;
       }
-
       if (_teleporting) {
         _teleportTimer += dt;
-        const half = 0.5;
+        const half = 0.32;
         if (_teleportTimer < half) {
           _teleportFade = 1.0 - (_teleportTimer / half);
         } else if (_teleportTimer < half * 2) {
           if (_teleportFade < 0.05) {
-            // Snap to new position silently
-            _orbX = _pendingTx;
-            _orbY = _pendingTy;
-            _wanderTx = _pendingTx;
-            _wanderTy = _pendingTy;
-            _engine.resetTrail(_orbX, _orbY);
+            final nx = 0.20 + _rng.nextDouble() * 0.60;
+            final ny = 0.16 + _rng.nextDouble() * 0.46;
+            _orbX = nx; _orbY = ny;
+            _rephaseToPosition(nx, ny);
+            _engine.resetTrail(nx, ny);
           }
           _teleportFade = ((_teleportTimer - half) / half).clamp(0.0, 1.0);
         } else {
@@ -161,50 +187,50 @@ class _FluidBackgroundState extends State<FluidBackground>
         }
       }
 
-      // ── Smooth wander: ease orb position toward wander target ────────────
-      // Use a gentle spring — very smooth, 120fps friendly
-      const double springK = 0.9; // lower = slower/smoother
-      _orbX += (_wanderTx - _orbX) * springK * dt;
-      _orbY += (_wanderTy - _orbY) * springK * dt;
+      final rawX = _cx + _ax * sin(_wx * _t + _px);
+      final rawY = _cy + _ay * sin(_wy * _t + _py);
+      final targetX = rawX.clamp(0.10, 0.90);
+      final targetY = rawY.clamp(0.12, 0.78);
 
-      // Clamp away from edges so addForce never gets weird values
-      _orbX = _orbX.clamp(0.12, 0.88);
-      _orbY = _orbY.clamp(0.10, 0.65);
+      _orbX += (targetX - _orbX) * (1.0 - exp(-6.0 * dt));
+      _orbY += (targetY - _orbY) * (1.0 - exp(-6.0 * dt));
 
-      // Stamp the trail at the smooth position every frame
-      _engine.pushTrailDense(_orbX, _orbY);
+      _engine.forceTrailPoint(_orbX, _orbY);
 
-      // Velocity is the direction of movement — gives the comet tail
-      final velX = (_wanderTx - _orbX) * 0.08 * _currentSpeed;
-      final velY = (_wanderTy - _orbY) * 0.08 * _currentSpeed;
-      _engine.velocityField.addForce(_orbX, _orbY, velX, velY, aspect: as);
-
-      // Keep orb bright — maintain touchForce during idle
-      _engine.setTouchForce(0.90);
-
+      if (_frameCnt % 2 == 0) {
+        final velX = _ax * _wx * cos(_wx * _t + _px) * 0.02 * _currentSpeed;
+        final velY = _ay * _wy * cos(_wy * _t + _py) * 0.02 * _currentSpeed;
+        _engine.velocityField.addForce(_orbX, _orbY, velX, velY,
+            aspect: _size.width / _size.height);
+      }
     } else {
-      _idleTimer    = 0.0;
       _teleporting  = false;
       _teleportFade = 1.0;
     }
 
-    if (!_physicsRunning) _dispatchPhysics(eff);
+    if (_frameCnt % 3 == 0 && !_physicsRunning) {
+      _dispatchPhysics(eff);
+    }
+
     _repaint.value++;
   }
 
+  bool _physicsRunning = false;
   void _dispatchPhysics(double dt) {
     _physicsRunning = true;
     final vx = Float32List.fromList(_engine.velocityField.velX);
     final vy = Float32List.fromList(_engine.velocityField.velY);
-    compute<List<dynamic>, Float32List>(_physicsStep, [vx, vy, dt]).then((r) {
-      const int n = VelocityField.kCells;
-      _engine.velocityField.velX.setAll(0, r.sublist(0, n));
-      _engine.velocityField.velY.setAll(0, r.sublist(n, n * 2));
-      _physicsRunning = false;
-    }).catchError((_) => _physicsRunning = false);
+    compute<List<dynamic>, Float32List>(_physicsStep, [vx, vy, dt])
+        .then((r) {
+          if (!mounted) return;
+          const int n = VelocityField.kCells;
+          _engine.velocityField.velX.setAll(0, r.sublist(0, n));
+          _engine.velocityField.velY.setAll(0, r.sublist(n, n * 2));
+          _physicsRunning = false;
+        })
+        .catchError((_) => _physicsRunning = false);
   }
 
-  // ── Touch handlers — clamp to safe zone away from edges ──────────────────
   Offset _safeNorm(Offset local) => Offset(
     (local.dx / _size.width).clamp(0.05, 0.95),
     (local.dy / _size.height).clamp(0.05, 0.95),
@@ -213,7 +239,6 @@ class _FluidBackgroundState extends State<FluidBackground>
   void _onPointerDown(PointerDownEvent e) {
     if (_activePointer != null) return;
     _activePointer = e.pointer;
-    _idleTimer     = 0.0;
     _teleporting   = false;
     _teleportFade  = 1.0;
     if (_size == Size.zero) return;
@@ -222,14 +247,12 @@ class _FluidBackgroundState extends State<FluidBackground>
     _engine.resetTrail(n.dx, n.dy);
     _engine.setTouching(true);
     _engine.setTouch(n);
-    _engine.setTouchForce(1.0);
+    _engine.setTouchForce(0.0);
     _engine.setTouchBurst(1.0);
     _engine.setVelocity(Offset.zero);
     _lastMoveVelocity = Offset.zero;
     _engine.velocityField.addForce(n.dx, n.dy, 0, 0, aspect: as);
-    // Sync idle orb position to touch so wander resumes from here
     _orbX = n.dx; _orbY = n.dy;
-    _wanderTx = n.dx; _wanderTy = n.dy;
   }
 
   void _onPointerMove(PointerMoveEvent e) {
@@ -244,12 +267,10 @@ class _FluidBackgroundState extends State<FluidBackground>
       _lastMoveVelocity.dx * 0.6 + vx * 0.4,
       _lastMoveVelocity.dy * 0.6 + vy * 0.4,
     );
-    final prev = _engine.velocity;
     _engine.setVelocity(Offset(
-      prev.dx * 0.75 + vx * 0.25,
-      prev.dy * 0.75 + vy * 0.25,
+      _engine.velocity.dx * 0.75 + vx * 0.25,
+      _engine.velocity.dy * 0.75 + vy * 0.25,
     ));
-    _engine.setTouchForce(1.0);
     _engine.pushTrailDense(n.dx, n.dy);
     _engine.velocityField.addForce(n.dx, n.dy, vx * 38.0, vy * 38.0, aspect: as);
     _orbX = n.dx; _orbY = n.dy;
@@ -259,16 +280,14 @@ class _FluidBackgroundState extends State<FluidBackground>
     if (e.pointer != _activePointer) return;
     _activePointer = null;
     if (_size == Size.zero) return;
-    final pixelVel = Offset(
-      _lastMoveVelocity.dx * _size.width,
-      _lastMoveVelocity.dy * _size.height,
+    _engine.assignDriftOnRelease(
+      Offset(_lastMoveVelocity.dx * _size.width,
+             _lastMoveVelocity.dy * _size.height),
+      _size,
     );
-    _engine.assignDriftOnRelease(pixelVel, _size);
     _engine.setTouching(false);
     _lastMoveVelocity = Offset.zero;
-    // Resume wander from release point
-    _wanderTx = _orbX; _wanderTy = _orbY;
-    _pickNewWanderTarget();
+    _rephaseFromCurrentPosition();
   }
 
   void _onPointerCancel(PointerCancelEvent e) {
@@ -276,6 +295,7 @@ class _FluidBackgroundState extends State<FluidBackground>
     _activePointer = null;
     _engine.setTouching(false);
     _lastMoveVelocity = Offset.zero;
+    _rephaseFromCurrentPosition();
   }
 
   @override
@@ -298,24 +318,24 @@ class _FluidBackgroundState extends State<FluidBackground>
         onPointerCancel: _onPointerCancel,
         child: Stack(
           children: [
-            // Fluid — fades during teleport only
-            Opacity(
-              opacity: _teleportFade.clamp(0.0, 1.0),
-              child: RepaintBoundary(
-                child: ValueListenableBuilder<int>(
-                  valueListenable: _repaint,
-                  builder: (_, __, ___) => CustomPaint(
-                    painter: FluidPainter(
-                      engine:     _engine,
-                      screenSize: _size,
-                      repaint:    _repaint,
-                    ),
-                    size: Size.infinite,
+            // ── Orb painter ───────────────────────────────────────────────
+            // Opacity != 1.0 forces Flutter to composite this into its own
+            // layer, which makes BackdropFilter on the glass cards able to
+            // sample and blur the orb behind them.
+            ValueListenableBuilder<int>(
+              valueListenable: _repaint,
+              builder: (_, __, ___) => Opacity(
+                opacity: (_teleportFade * 0.9999).clamp(0.0, 0.9999),
+                child: CustomPaint(
+                  painter: FluidPainter(
+                    engine:     _engine,
+                    screenSize: _size,
+                    repaint:    _repaint,
                   ),
+                  size: Size.infinite,
                 ),
               ),
             ),
-            // UI on top — always fully visible
             if (widget.child != null) widget.child!,
           ],
         ),

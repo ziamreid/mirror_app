@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'screens/language_screen.dart';
+import 'screens/splash_screen.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -17,9 +17,9 @@ class EyeApp extends StatelessWidget {
       theme: ThemeData(
         brightness: Brightness.dark,
         scaffoldBackgroundColor: Colors.black,
-        fontFamily: 'SF Pro Display', // iOS default — falls back gracefully
+        fontFamily: '.SF Pro Rounded',
       ),
-      home: const LanguageScreen(),
+      home: const SplashScreen(),
     );
   }
 }

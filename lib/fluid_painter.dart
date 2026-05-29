@@ -13,30 +13,37 @@ class TrailPoint {
 }
 
 class FluidEngine {
-  static const int    _kTrailLen   = 80;
-  static const double _kTrailDecay = 0.050;
-  static const double _kMinDist    = 0.007;
+static const int kTrailLen  = 80;
+  static const double kTrailDecay = 0.035;
+  static const double kMinDist    = 0.007;
 
   Offset _touch      = const Offset(0.5, 0.5);
   Offset _lastPush   = const Offset(-1, -1);
   Offset _velocity   = Offset.zero;
-  double _touchForce = 0.0;
+  double _touchForce = 1.0;
   double _touchBurst = 0.0;
   bool   _touching   = false;
 
   final List<TrailPoint> trail = List.generate(
-      _kTrailLen, (_) => TrailPoint(0.5, 0.5)..age = 1.0);
+      kTrailLen, (_) => TrailPoint(0.5, 0.35)..age = 0.0);
   int _trailHead = 0;
 
   final VelocityField velocityField = VelocityField();
+
+  void trailHeadSet(int v) => _trailHead = v % kTrailLen;
+
+  void forceTrailPoint(double x, double y) {
+    trail[_trailHead] = TrailPoint(x, y)..age = 0.0;
+    _trailHead = (_trailHead + 1) % kTrailLen;
+    _lastPush  = Offset(x, y);
+  }
 
   void tick(double dt) {
     if (_touching) {
       _touchForce = 1.0;
     } else {
-      _touchForce = (_touchForce - dt * 2.0).clamp(0.0, 1.0);
+      _touchForce = (_touchForce - dt * 1.2).clamp(0.0, 1.0);
     }
-
     _touchBurst = (_touchBurst - dt * 4.0).clamp(0.0, 1.0);
     _velocity   = _velocity * 0.88;
 
@@ -53,45 +60,41 @@ class FluidEngine {
 
     if (_touching) {
       for (final p in trail) {
-        p.age = (p.age + dt * _kTrailDecay).clamp(0.0, 1.0);
+        p.age = (p.age + dt * kTrailDecay).clamp(0.0, 1.0);
       }
     } else {
-      for (int i = 0; i < _kTrailLen; i++) {
-        final idx = (_trailHead - 1 - i + _kTrailLen) % _kTrailLen;
+      for (int i = 0; i < kTrailLen; i++) {
+        final idx = (_trailHead - 1 - i + kTrailLen) % kTrailLen;
         final p   = trail[idx];
         if (p.age >= 1.0) continue;
-        final trailPos   = i / (_kTrailLen - 1).toDouble();
-        final pointDecay = _kTrailDecay * 10.0 * (1.0 + trailPos * 5.0);
+        final trailPos   = i / (kTrailLen - 1).toDouble();
+        final pointDecay =  kTrailDecay * 5.0 * (1.0 + trailPos * 2.5);
         p.age = (p.age + dt * pointDecay).clamp(0.0, 1.0);
       }
     }
   }
 
   void resetTrail(double nx, double ny) {
-    // Age all points out first
     for (final p in trail) {
       p.x = nx; p.y = ny; p.age = 1.0;
       p.driftX = 0.0; p.driftY = 0.0;
     }
     _trailHead = 0;
     _lastPush  = Offset(nx, ny);
-
-    // Pre-stamp several overlapping points at age=0 so the glow is
-    // immediately full-bright the moment the thumb touches — no build-up delay.
-    for (int i = 0; i < 18; i++) {
+    for (int i = 0; i < 28; i++) {
       trail[i] = TrailPoint(nx, ny)..age = 0.0;
     }
-    _trailHead = 18;
+    _trailHead = 28;
   }
 
   void pushTrailDense(double nx, double ny) {
     final lx = _lastPush.dx;
     final ly = _lastPush.dy;
-    if (lx < 0) { _writePt(nx, ny); _lastPush = Offset(nx, ny); return; }
+    if (lx < 0) { forceTrailPoint(nx, ny); return; }
     final dx = nx - lx, dy = ny - ly;
     final dist = sqrt(dx * dx + dy * dy);
-    if (dist < _kMinDist) return;
-    final steps = (dist / _kMinDist).ceil().clamp(1, 20);
+    if (dist < kMinDist) return;
+    final steps = (dist / kMinDist).ceil().clamp(1, 20);
     for (int s = 1; s <= steps; s++) {
       final t = s / steps;
       _writePt(lx + dx * t, ly + dy * t);
@@ -101,7 +104,7 @@ class FluidEngine {
 
   void _writePt(double x, double y) {
     trail[_trailHead] = TrailPoint(x, y);
-    _trailHead = (_trailHead + 1) % _kTrailLen;
+    _trailHead = (_trailHead + 1) % kTrailLen;
   }
 
   void assignDriftOnRelease(Offset pixelVelocity, Size screenSize) {
@@ -112,16 +115,25 @@ class FluidEngine {
     final normX     = flingX / flingMag;
     final normY     = flingY / flingMag;
     final cappedMag = flingMag.clamp(0.0, 0.6);
-    for (int i = 0; i < _kTrailLen; i++) {
-      final idx = (_trailHead - 1 - i + _kTrailLen) % _kTrailLen;
+    for (int i = 0; i < kTrailLen; i++) {
+      final idx = (_trailHead - 1 - i + kTrailLen) % kTrailLen;
       final p   = trail[idx];
       if (p.age >= 0.98) continue;
-      final headness = 0.30 + 0.70 * (1.0 - (i / _kTrailLen));
+      final headness = 0.30 + 0.70 * (1.0 - (i / kTrailLen));
       final fwdStr   = headness * cappedMag * 1.2;
       p.driftX = normX * fwdStr;
       p.driftY = normY * fwdStr;
     }
   }
+
+  Offset get orbCenter {
+    final idx = (_trailHead - 1 + kTrailLen) % kTrailLen;
+    final p   = trail[idx];
+    return Offset(p.x, p.y);
+  }
+
+  double get orbX => orbCenter.dx;
+  double get orbY => orbCenter.dy;
 
   int    get trailHead  => _trailHead;
   bool   get touching   => _touching;
@@ -130,11 +142,11 @@ class FluidEngine {
   double get touchForce => _touchForce;
   double get touchBurst => _touchBurst;
 
-  void setTouch(Offset t)      => _touch = t;
-  void setVelocity(Offset v)   => _velocity = v;
-  void setTouchForce(double f) => _touchForce = f;
-  void setTouchBurst(double b) => _touchBurst = b;
-  void setTouching(bool v)     => _touching = v;
+  void setTouch(Offset t)              => _touch = t;
+  void setVelocity(Offset v)           => _velocity = v;
+  void setTouchForce(double f)         => _touchForce = f;
+  void setTouchBurst(double b)         => _touchBurst = b;
+  void setTouching(bool v)             => _touching = v;
   void setLastPush(double x, double y) => _lastPush = Offset(x, y);
 }
 
@@ -156,45 +168,34 @@ class FluidPainter extends CustomPainter {
   }
 
   void _drawTrail(Canvas canvas, double fw, double fh) {
-    // Bigger: 0.14 → 0.19
-    final auraR      = fh * 0.19;
-    final touching   = engine.touching;
-    final touchForce = engine.touchForce;
+    final auraR = fh * 0.15;
 
-    const double kSkipPx = 16.0;
+    const double kSkipPx = 10.0;
     double lastDrawX = -9999, lastDrawY = -9999;
 
-    for (int i = FluidEngine._kTrailLen - 1; i >= 0; i--) {
-      final idx = (engine.trailHead - 1 - i + FluidEngine._kTrailLen)
-          % FluidEngine._kTrailLen;
+    for (int i = FluidEngine.kTrailLen - 1; i >= 0; i--) {
+      final idx = (engine.trailHead - 1 - i + FluidEngine.kTrailLen)
+          % FluidEngine.kTrailLen;
       final p = engine.trail[idx];
       if (p.age >= 0.97) continue;
 
-      final op = pow(1.0 - p.age, 2.2) as double;
+      final op = pow(1.0 - p.age, 1.8) as double;
       if (op < 0.01) continue;
 
       final cx = p.x * fw;
       final cy = p.y * fh;
 
-      if (touching) {
+      if (engine.touching) {
         final ddx = cx - lastDrawX, ddy = cy - lastDrawY;
         if (ddx * ddx + ddy * ddy < kSkipPx * kSkipPx) continue;
       }
       lastDrawX = cx; lastDrawY = cy;
 
-      final trailPos = i / FluidEngine._kTrailLen.toDouble();
+      final trailPos   = i / FluidEngine.kTrailLen.toDouble();
+      final radiusMult = 0.50 + trailPos * 0.55;
+      final r          = auraR * radiusMult;
+      final pinkMix    = 0.25 + trailPos * 0.75;
 
-      // Use touchForce directly (no touching gate) so size shrinks
-      // smoothly after release instead of snapping off instantly.
-      final forceSizeLift = touchForce * 0.25 * trailPos;
-      final radiusMult    = 0.45 + trailPos * 0.55 + forceSizeLift;
-      final r             = auraR * radiusMult;
-      final pinkMix       = 0.30 + trailPos * 0.70;
-      final lift          = touchForce * 0.60;
-
-      // Gradient: first bright stop pulled in to 0.15 (was 0.28).
-      // Eliminates the hollow donut on single-point touch while still
-      // preventing the center-line blowout when circles stack.
       canvas.drawCircle(
         Offset(cx, cy), r,
         Paint()
@@ -203,16 +204,27 @@ class FluidPainter extends CustomPainter {
             Offset(cx, cy), r,
             [
               const Color(0x00000000),
-              Color.fromARGB(_a(op * 0.10),
-                _lerp(120, 255, pinkMix), _lerp(0, 80, pinkMix), 255),
-              Color.fromARGB(_a(op * (0.78 + lift)),
-                _lerp(160, 255, pinkMix), _lerp(10, 60, pinkMix), 255),
-              Color.fromARGB(_a(op * (0.52 + lift * 0.7)),
-                _lerp(100, 220, pinkMix), _lerp(0, 40, pinkMix),
-                _lerp(200, 255, pinkMix)),
+              Color.fromARGB(
+                _a(op * 0.18),
+                _lerp(100, 240, pinkMix),
+                _lerp(0,   70, pinkMix),
+                255,
+              ),
+              Color.fromARGB(
+                _a(op * 0.88),
+                _lerp(150, 255, pinkMix),
+                _lerp(0,   50, pinkMix),
+                255,
+              ),
+              Color.fromARGB(
+                _a(op * 0.60),
+                _lerp(90,  210, pinkMix),
+                _lerp(0,   30, pinkMix),
+                _lerp(210, 255, pinkMix),
+              ),
               const Color(0x00000000),
             ],
-            [0.0, 0.25, 0.50, 0.78, 1.0],
+            [0.0, 0.20, 0.48, 0.75, 1.0],
           ),
       );
     }

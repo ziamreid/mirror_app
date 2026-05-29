@@ -1,8 +1,10 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
+import '../fluid_painter.dart';
 import '../models/app_theme.dart';
 import '../models/onboarding_data.dart';
 import '../widgets/fluid_background.dart';
+import '../widgets/orb_aware_text.dart';
 import 'onboarding_screen.dart';
 
 class LanguageScreen extends StatefulWidget {
@@ -13,9 +15,10 @@ class LanguageScreen extends StatefulWidget {
 
 class _LanguageScreenState extends State<LanguageScreen>
     with SingleTickerProviderStateMixin {
-  AppLanguage?         _selected;
+  AppLanguage?          _selected;
   late AnimationController _fadeIn;
-  final FluidController    _fluidCtrl = FluidController();
+  final FluidController    _fluidCtrl  = FluidController();
+  // GlobalKey for the cards column — touches inside here won't move the orb
 
   @override
   void initState() {
@@ -44,6 +47,16 @@ class _LanguageScreenState extends State<LanguageScreen>
     });
   }
 
+  FluidEngine?        get _engine  => _fluidCtrl.engine;
+  ValueNotifier<int>? get _repaint => _fluidCtrl.repaint;
+
+  Widget _maybeOrb(Widget child) {
+    final e = _engine;
+    final r = _repaint;
+    if (e == null || r == null) return child;
+    return OrbAwareText(engine: e, repaint: r, child: child);
+  }
+
   @override
   Widget build(BuildContext context) {
     return FluidBackground(
@@ -57,49 +70,57 @@ class _LanguageScreenState extends State<LanguageScreen>
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const SizedBox(height: 52),
-                const Text('EYE', style: AppTheme.appNameStyle),
+                _maybeOrb(const Text('EYE', style: AppTheme.appNameStyle)),
                 const SizedBox(height: 6),
-                Text(
+                _maybeOrb(Text(
                   'CHOOSE YOUR LANGUAGE',
                   style: AppTheme.labelStyle.copyWith(
                     color: AppTheme.textHint,
                     letterSpacing: 2.2,
                   ),
-                ),
+                )),
                 const Spacer(),
-                _LangCard(
-                  label: 'ENGLISH',
-                  sublabel: 'speak to me clearly',
-                  emoji: '🌐',
-                  selected: _selected == AppLanguage.english,
-                  onTap: () => _onSelect(AppLanguage.english),
-                ),
-                const SizedBox(height: 12),
-                _LangCard(
-                  label: 'FRANKO',
-                  sublabel: 'kalam 3adi zayak',
-                  emoji: '💬',
-                  selected: _selected == AppLanguage.franko,
-                  onTap: () => _onSelect(AppLanguage.franko),
-                ),
-                const SizedBox(height: 12),
-                _LangCard(
-                  label: 'عربي',
-                  sublabel: 'بالكلام الصريح',
-                  emoji: '✦',
-                  selected: _selected == AppLanguage.arabic,
-                  onTap: () => _onSelect(AppLanguage.arabic),
-                  isArabic: true,
+                // Wrap cards in a keyed container — touches here are blocked
+                Column(
+                  children: [
+                    _LangCard(
+                      label: 'ENGLISH',
+                      sublabel: 'speak to me clearly',
+                      emoji: '🌐',
+                      selected: _selected == AppLanguage.english,
+                      onTap: () => _onSelect(AppLanguage.english),
+                      fluidCtrl: _fluidCtrl,
+                    ),
+                    const SizedBox(height: 12),
+                    _LangCard(
+                      label: 'FRANKO',
+                      sublabel: 'kalam 3adi zayak',
+                      emoji: '💬',
+                      selected: _selected == AppLanguage.franko,
+                      onTap: () => _onSelect(AppLanguage.franko),
+                      fluidCtrl: _fluidCtrl,
+                    ),
+                    const SizedBox(height: 12),
+                    _LangCard(
+                      label: 'عربي',
+                      sublabel: 'بالكلام الصريح',
+                      emoji: '✦',
+                      selected: _selected == AppLanguage.arabic,
+                      onTap: () => _onSelect(AppLanguage.arabic),
+                      isArabic: true,
+                      fluidCtrl: _fluidCtrl,
+                    ),
+                  ],
                 ),
                 const Spacer(),
                 Center(
-                  child: Text(
+                  child: _maybeOrb(Text(
                     'you can change this later',
                     style: AppTheme.labelStyle.copyWith(
                       color: AppTheme.textHint,
                       letterSpacing: 0.8,
                     ),
-                  ),
+                  )),
                 ),
                 const SizedBox(height: 36),
               ],
@@ -113,12 +134,13 @@ class _LanguageScreenState extends State<LanguageScreen>
 
 // ─── Language card ────────────────────────────────────────────────────────────
 class _LangCard extends StatefulWidget {
-  final String   label;
-  final String   sublabel;
-  final String   emoji;
-  final bool     selected;
-  final bool     isArabic;
-  final VoidCallback onTap;
+  final String          label;
+  final String          sublabel;
+  final String          emoji;
+  final bool            selected;
+  final bool            isArabic;
+  final VoidCallback    onTap;
+  final FluidController fluidCtrl;
 
   const _LangCard({
     required this.label,
@@ -126,6 +148,7 @@ class _LangCard extends StatefulWidget {
     required this.emoji,
     required this.selected,
     required this.onTap,
+    required this.fluidCtrl,
     this.isArabic = false,
   });
 
@@ -150,12 +173,19 @@ class _LangCardState extends State<_LangCard>
   @override
   void dispose() { _press.dispose(); super.dispose(); }
 
+  Widget _orb(Widget child) {
+    final e = widget.fluidCtrl.engine;
+    final r = widget.fluidCtrl.repaint;
+    if (e == null || r == null) return child;
+    return OrbAwareText(engine: e, repaint: r, child: child);
+  }
+
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTapDown:  (_) => _press.forward(),
-      onTapUp:    (_) { _press.reverse(); widget.onTap(); },
-      onTapCancel:()  => _press.reverse(),
+      onTapDown:   (_) => _press.forward(),
+      onTapUp:     (_) { _press.reverse(); widget.onTap(); },
+      onTapCancel: ()  => _press.reverse(),
       child: AnimatedBuilder(
         animation: _press,
         builder: (_, child) => Transform.scale(
@@ -165,14 +195,12 @@ class _LangCardState extends State<_LangCard>
         child: ClipRRect(
           borderRadius: BorderRadius.circular(18),
           child: BackdropFilter(
-            // Strong blur — orb becomes a soft haze behind this card
             filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 220),
               curve: Curves.easeOut,
               height: 84,
               decoration: BoxDecoration(
-                // Dark semi-transparent fill so orb glows through but text is readable
                 color: widget.selected
                     ? const Color(0x22a855f7)
                     : const Color(0x18000000),
@@ -187,7 +215,7 @@ class _LangCardState extends State<_LangCard>
               padding: const EdgeInsets.symmetric(horizontal: 22),
               child: Row(
                 children: [
-                  Text(
+                  _orb(Text(
                     widget.emoji,
                     style: TextStyle(
                       fontSize: 20,
@@ -195,16 +223,16 @@ class _LangCardState extends State<_LangCard>
                           ? AppTheme.midPurple
                           : AppTheme.textSecondary,
                     ),
-                  ),
+                  )),
                   const SizedBox(width: 16),
                   Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
+                      _orb(Text(
                         widget.label,
                         style: TextStyle(
-                          fontFamily: '.SF Pro Display',
+                          fontFamily: '.SF Pro Rounded',
                           color: AppTheme.textPrimary,
                           fontSize: 16,
                           fontWeight: widget.selected
@@ -212,16 +240,16 @@ class _LangCardState extends State<_LangCard>
                               : FontWeight.w300,
                           letterSpacing: widget.isArabic ? 0.5 : 2.8,
                         ),
-                      ),
+                      )),
                       const SizedBox(height: 4),
-                      Text(
+                      _orb(Text(
                         widget.sublabel,
                         style: AppTheme.labelStyle.copyWith(
                           color: AppTheme.textHint,
                           letterSpacing: widget.isArabic ? 0.3 : 0.7,
                           fontSize: 10,
                         ),
-                      ),
+                      )),
                     ],
                   ),
                   const Spacer(),
