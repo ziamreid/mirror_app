@@ -28,10 +28,9 @@ class _SplashScreenState extends State<SplashScreen>
   bool         _showCards = false;
   AppLanguage? _selected;
 
-  // Header proximity tracking
-  final GlobalKey _headerKey = GlobalKey();
-  double _headerProximity = 0.0;
-  int    _headerFrameSkip = 0;
+  final GlobalKey _headerKey      = GlobalKey();
+  double          _headerProximity = 0.0;
+  int             _headerFrameSkip = 0;
 
   @override
   void initState() {
@@ -40,9 +39,9 @@ class _SplashScreenState extends State<SplashScreen>
         duration: const Duration(milliseconds: 1300));
     _cardsCtrl = AnimationController(vsync: this,
         duration: const Duration(milliseconds: 1600));
-    _maskCtrl  = AnimationController(vsync: this,
-        duration: const Duration(milliseconds: 800));
-    _maskAnim  = CurvedAnimation(parent: _maskCtrl, curve: Curves.easeInOut);
+    _maskCtrl = AnimationController(vsync: this,
+        duration: const Duration(milliseconds: 400));
+    _maskAnim = CurvedAnimation(parent: _maskCtrl, curve: Curves.easeInOut);
 
     _headerAnim = CurvedAnimation(parent: _cardsCtrl,
         curve: const Interval(0.00, 0.40, curve: Curves.easeOut));
@@ -59,18 +58,20 @@ class _SplashScreenState extends State<SplashScreen>
 
   Future<void> _runSequence() async {
     await _bloomCtrl.forward();
-    await Future.delayed(const Duration(milliseconds: 1200));
+    await Future.delayed(const Duration(milliseconds: 900));
     if (!mounted) return;
     _fluidCtrl.setSpeed(1.5);
+
     _maskCtrl.forward();
     setState(() => _showCards = true);
-    await Future.delayed(const Duration(milliseconds: 100));
+    await Future.delayed(const Duration(milliseconds: 80));
     if (!mounted) return;
+
+    _maskCtrl.reverse();
+
     await _cardsCtrl.forward();
     if (!mounted) return;
     _fluidCtrl.setSpeed(1.0);
-    await _maskCtrl.reverse();
-    // Start tracking header proximity after cards settle
     _fluidCtrl.repaint?.addListener(_onFrame);
   }
 
@@ -124,7 +125,6 @@ class _SplashScreenState extends State<SplashScreen>
 
   @override
   Widget build(BuildContext context) {
-    // Header text color reacts to orb brightness
     final t = ((_headerProximity - 0.45) / 0.40).clamp(0.0, 1.0);
     final headerColor    = Color.lerp(AppTheme.textPrimary,   const Color(0xFF1a0a2e), t)!;
     final subheaderColor = Color.lerp(AppTheme.textSecondary, const Color(0x991a0a2e), t)!;
@@ -153,17 +153,12 @@ class _SplashScreenState extends State<SplashScreen>
                             children: [
                               Text('Choose your language',
                                   style: AppTheme.headlineStyle.copyWith(
-                                    fontSize: 22,
-                                    color: headerColor,
-                                  )),
+                                    fontSize: 22, color: headerColor)),
                               const SizedBox(height: 6),
                               Text('this shapes how Eye speaks to you',
                                   style: AppTheme.labelStyle.copyWith(
-                                    color: subheaderColor,
-                                    fontSize: 12,
-                                    letterSpacing: 0.2,
-                                    fontWeight: FontWeight.w400,
-                                  )),
+                                    color: subheaderColor, fontSize: 12,
+                                    letterSpacing: 0.2, fontWeight: FontWeight.w400)),
                             ],
                           ),
                         ),
@@ -172,7 +167,8 @@ class _SplashScreenState extends State<SplashScreen>
                     const SizedBox(height: 20),
                     _MaterialCard(
                       progress: _card0, label: 'ENGLISH',
-                      sublabel: 'speak to me clearly', icon: const _USFlagIcon(),
+                      sublabel: 'speak to me clearly',
+                      icon: const _EmojiIcon('🗽'),
                       selected: _selected == AppLanguage.english,
                       onTap: () => _onSelect(AppLanguage.english),
                       hasShimmer: false, engine: _engine, repaint: _repaint,
@@ -181,7 +177,8 @@ class _SplashScreenState extends State<SplashScreen>
                     const SizedBox(height: 12),
                     _MaterialCard(
                       progress: _card1, label: 'FRANKO',
-                      sublabel: 'kalam 3adi zayak', icon: const _FrankoIcon(),
+                      sublabel: 'kalam 3adi zayak',
+                      icon: const _FrankoIcon(),
                       selected: _selected == AppLanguage.franko,
                       onTap: () => _onSelect(AppLanguage.franko),
                       hasShimmer: true, engine: _engine, repaint: _repaint,
@@ -190,7 +187,8 @@ class _SplashScreenState extends State<SplashScreen>
                     const SizedBox(height: 12),
                     _MaterialCard(
                       progress: _card2, label: 'عربي',
-                      sublabel: 'بالكلام الصريح', icon: const _ArabicIcon(),
+                      sublabel: 'بالكلام الصريح',
+                      icon: const _ArabicIcon(),
                       selected: _selected == AppLanguage.arabic,
                       onTap: () => _onSelect(AppLanguage.arabic),
                       hasShimmer: false, isArabic: true,
@@ -213,12 +211,11 @@ class _SplashScreenState extends State<SplashScreen>
                 ],
               ),
             ),
-            // Entrance mask
             AnimatedBuilder(
               animation: _maskAnim,
               builder: (_, __) {
-                final o = _maskAnim.value;
-                if (o <= 0.001) return const SizedBox.shrink();
+                final o = _maskAnim.value * 0.55;
+                if (o <= 0.01) return const SizedBox.shrink();
                 return Positioned.fill(
                   child: IgnorePointer(
                     child: DecoratedBox(
@@ -330,7 +327,7 @@ class _MaterialCardState extends State<_MaterialCard>
     return AnimatedBuilder(
       animation: widget.progress,
       builder: (_, child) {
-        final t    = widget.progress.value;
+        final t     = widget.progress.value;
         final blur  = (1.0 - t) * 12.0;
         final slide = (1.0 - t) * 16.0;
         return Opacity(
@@ -344,28 +341,31 @@ class _MaterialCardState extends State<_MaterialCard>
           ),
         );
       },
-      child: GestureDetector(
-        onTapDown:   (_) { _press.forward();  widget.fluidCtrl.lockOrb(); },
-        onTapUp:     (_) { _press.reverse();  widget.fluidCtrl.unlockOrb(); widget.onTap(); },
-        onTapCancel: ()  { _press.reverse();  widget.fluidCtrl.unlockOrb(); },
-        child: AnimatedBuilder(
-          animation: _press,
-          builder: (_, child) => Transform.scale(scale: 1.0 - _press.value * 0.03, child: child),
-          child: SizedBox(
-            key: _key,
-            child: widget.hasShimmer
-                ? AnimatedBuilder(
-                    animation: _sweepAnim,
-                    builder: (_, child) => _LiquidGlassCard(
-                      selected: widget.selected, shimmer: _sweepAnim.value,
-                      proximity: _proximity, orbOffset: _localOrb, child: child!,
+      child: Listener(
+        onPointerDown:   (_) { _press.forward();  widget.fluidCtrl.lockOrb(); },
+        onPointerUp:     (_) { _press.reverse();  widget.fluidCtrl.unlockOrb(); },
+        onPointerCancel: (_) { _press.reverse();  widget.fluidCtrl.unlockOrb(); },
+        child: GestureDetector(
+          onTap: widget.onTap,
+          child: AnimatedBuilder(
+            animation: _press,
+            builder: (_, child) => Transform.scale(scale: 1.0 - _press.value * 0.03, child: child),
+            child: SizedBox(
+              key: _key,
+              child: widget.hasShimmer
+                  ? AnimatedBuilder(
+                      animation: _sweepAnim,
+                      builder: (_, child) => _LiquidGlassCard(
+                        selected: widget.selected, shimmer: _sweepAnim.value,
+                        proximity: _proximity, orbOffset: _localOrb, child: child!,
+                      ),
+                      child: _buildContent(),
+                    )
+                  : _LiquidGlassCard(
+                      selected: widget.selected, shimmer: 0,
+                      proximity: _proximity, orbOffset: _localOrb, child: _buildContent(),
                     ),
-                    child: _buildContent(),
-                  )
-                : _LiquidGlassCard(
-                    selected: widget.selected, shimmer: 0,
-                    proximity: _proximity, orbOffset: _localOrb, child: _buildContent(),
-                  ),
+            ),
           ),
         ),
       ),
@@ -414,7 +414,6 @@ class _LiquidGlassCard extends StatelessWidget {
   }
 }
 
-// ── Painter ───────────────────────────────────────────────────────────────────
 class _LiquidGlassPainter extends CustomPainter {
   final bool selected; final double shimmer, proximity; final Offset orbOffset; final int borderAlpha;
   const _LiquidGlassPainter({required this.selected, required this.shimmer,
@@ -424,7 +423,6 @@ class _LiquidGlassPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final rect  = Rect.fromLTWH(0, 0, size.width, size.height);
     final rrect = RRect.fromRectAndRadius(rect, const Radius.circular(18));
-
     if (shimmer > 0.0 && shimmer < 1.0) {
       final cx = size.width * (-0.3 + shimmer * 1.6);
       canvas.save(); canvas.clipRRect(rrect);
@@ -436,7 +434,6 @@ class _LiquidGlassPainter extends CustomPainter {
       ).createShader(Rect.fromCenter(center: Offset(cx, size.height/2), width: 180, height: size.height)));
       canvas.restore();
     }
-
     if (proximity > 0.05) {
       final ox = orbOffset.dx * size.width; final oy = orbOffset.dy * size.height;
       final glowR = size.width * 0.55;
@@ -450,7 +447,6 @@ class _LiquidGlassPainter extends CustomPainter {
       ).createShader(Rect.fromCircle(center: Offset(ox, oy), radius: glowR)));
       canvas.restore();
     }
-
     final dirX = (orbOffset.dx - 0.5) * 2.0; final dirY = (orbOffset.dy - 0.5) * 2.0;
     final gB = Alignment(dirX.clamp(-1.0,1.0), dirY.clamp(-1.0,1.0));
     final gE = Alignment(-dirX.clamp(-1.0,1.0), -dirY.clamp(-1.0,1.0));
@@ -463,7 +459,6 @@ class _LiquidGlassPainter extends CustomPainter {
           .createShader(rect)
       ..style = PaintingStyle.stroke
       ..strokeWidth = proximity > 0.15 ? 1.1 : 0.7);
-
     if (proximity > 0.05) {
       canvas.drawRRect(
         RRect.fromRectAndRadius(Rect.fromLTWH(1,1,size.width-2,size.height-2), const Radius.circular(17)),
@@ -492,12 +487,12 @@ class _CardContent extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = ((proximity - 0.55) / 0.35).clamp(0.0, 1.0);
     final labelColor    = Color.lerp(AppTheme.textPrimary, const Color(0xFF1a0a2e), t)!;
-    final sublabelColor = Color.lerp(AppTheme.textHint, const Color(0x99200040), t)!;
+    final sublabelColor = Color.lerp(AppTheme.textHint,    const Color(0x99200040), t)!;
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 22),
       child: Row(children: [
-        SizedBox(width: 28, height: 28,
+        SizedBox(width: 30, height: 30,
           child: isFranko
               ? ColorFiltered(
                   colorFilter: ColorFilter.matrix([
@@ -525,7 +520,6 @@ class _CardContent extends StatelessWidget {
           ],
         ),
         const Spacer(),
-        // FIX: Better selection indicator — animated checkmark pill
         AnimatedContainer(
           duration: const Duration(milliseconds: 300),
           curve: Curves.easeOutBack,
@@ -539,8 +533,7 @@ class _CardContent extends StatelessWidget {
                     border: Border.all(color: AppTheme.midPurple.withOpacity(0.5), width: 0.8),
                   ),
                   child: const Center(
-                    child: Icon(Icons.check_rounded,
-                      color: AppTheme.midPurple, size: 15),
+                    child: Icon(Icons.check_rounded, color: AppTheme.midPurple, size: 15),
                   ),
                 )
               : null,
@@ -552,72 +545,12 @@ class _CardContent extends StatelessWidget {
 
 // ── Icons ─────────────────────────────────────────────────────────────────────
 
-// FIX: Much more accurate US flag
-class _USFlagIcon extends StatelessWidget {
-  const _USFlagIcon();
+class _EmojiIcon extends StatelessWidget {
+  final String emoji;
+  const _EmojiIcon(this.emoji);
   @override
-  Widget build(BuildContext context) => SizedBox(
-    width: 32, height: 22,
-    child: ClipRRect(
-      borderRadius: BorderRadius.circular(3),
-      child: CustomPaint(painter: _USFlagPainter()),
-    ),
-  );
-}
-
-class _USFlagPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size s) {
-    final w = s.width; final h = s.height;
-    // 13 stripes
-    final sh = h / 13;
-    for (int i = 0; i < 13; i++) {
-      canvas.drawRect(
-        Rect.fromLTWH(0, i * sh, w, sh),
-        Paint()..color = i.isEven ? const Color(0xFFB22234) : Colors.white,
-      );
-    }
-    // Canton (blue field) — covers top-left 7 stripes
-    final cW = w * 0.385;
-    final cH = sh * 7;
-    canvas.drawRect(Rect.fromLTWH(0, 0, cW, cH),
-        Paint()..color = const Color(0xFF3C3B6E));
-
-    // Stars — 5 rows of 6 + 4 rows of 5, alternating
-    final starPaint = Paint()..color = Colors.white;
-    const rows = 9;
-    final rowH = cH / rows;
-    for (int r = 0; r < rows; r++) {
-      final isEvenRow = r.isEven;
-      final cols = isEvenRow ? 6 : 5;
-      final colW = cW / (isEvenRow ? 6 : 5);
-      final offsetX = isEvenRow ? colW / 2 : colW;
-      for (int c = 0; c < cols; c++) {
-        final sx = offsetX + c * colW;
-        final sy = rowH / 2 + r * rowH;
-        _drawStar(canvas, Offset(sx, sy), 1.1, starPaint);
-      }
-    }
-  }
-
-  void _drawStar(Canvas canvas, Offset center, double radius, Paint paint) {
-    final path = Path();
-    for (int i = 0; i < 5; i++) {
-      final angle = (i * 4 * pi / 5) - pi / 2;
-      final inner = radius * 0.4;
-      final innerAngle = angle + 2 * pi / 5;
-      final pt = Offset(center.dx + cos(angle) * radius,
-                        center.dy + sin(angle) * radius);
-      final ip = Offset(center.dx + cos(innerAngle) * inner,
-                        center.dy + sin(innerAngle) * inner);
-      if (i == 0) path.moveTo(pt.dx, pt.dy) ; else path.lineTo(pt.dx, pt.dy);
-      path.lineTo(ip.dx, ip.dy);
-    }
-    path.close();
-    canvas.drawPath(path, paint);
-  }
-
-  @override bool shouldRepaint(_) => false;
+  Widget build(BuildContext context) => Text(emoji,
+      style: const TextStyle(fontSize: 24, height: 1.0));
 }
 
 class _FrankoIcon extends StatelessWidget {

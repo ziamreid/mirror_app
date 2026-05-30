@@ -27,7 +27,6 @@ class FluidController {
   void _detach() => _state = null;
   void setSpeed(double v) => _state?._targetSpeed = v;
   void setMood(double v)  => _state?._targetMood  = v;
-  // FIX #3 - lock orb so card taps don't drag it
   void lockOrb()   => _state?._orbLocked = true;
   void unlockOrb() => _state?._orbLocked = false;
   FluidEngine?        get engine  => _state?._engine;
@@ -51,7 +50,7 @@ class _FluidBackgroundState extends State<FluidBackground>
   final ValueNotifier<int> _repaint = ValueNotifier<int>(0);
   int?   _activePointer;
   Offset _lastMoveVelocity = Offset.zero;
-  bool   _orbLocked = false; // FIX #3
+  bool   _orbLocked = false;
 
   double _t  = 0.0;
   double _wx = 0.22, _wy = 0.35;
@@ -203,7 +202,7 @@ class _FluidBackgroundState extends State<FluidBackground>
   );
 
   void _onPointerDown(PointerDownEvent e) {
-    if (_orbLocked) return; // FIX #3
+    if (_orbLocked) return;
     if (_activePointer != null) return;
     _activePointer = e.pointer;
     _teleporting = false; _teleportFade = 1.0;
@@ -222,7 +221,7 @@ class _FluidBackgroundState extends State<FluidBackground>
   }
 
   void _onPointerMove(PointerMoveEvent e) {
-    if (_orbLocked) return; // FIX #3
+    if (_orbLocked) return;
     if (e.pointer != _activePointer) return;
     if (_size == Size.zero) return;
     final n  = _safeNorm(e.localPosition);
@@ -230,18 +229,18 @@ class _FluidBackgroundState extends State<FluidBackground>
     final vx = e.delta.dx / _size.width;
     final vy = e.delta.dy / _size.height;
     _engine.setTouch(n);
-    // FIX #1 - higher weight on new velocity for snappier flings
+    // FIX: higher weight on new velocity (0.3 old, 0.7 new) for snappier flings
     _lastMoveVelocity = Offset(
-      _lastMoveVelocity.dx * 0.4 + vx * 0.6,
-      _lastMoveVelocity.dy * 0.4 + vy * 0.6,
+      _lastMoveVelocity.dx * 0.3 + vx * 0.7,
+      _lastMoveVelocity.dy * 0.3 + vy * 0.7,
     );
     _engine.setVelocity(Offset(
-      _engine.velocity.dx * 0.65 + vx * 0.35,
-      _engine.velocity.dy * 0.65 + vy * 0.35,
+      _engine.velocity.dx * 0.55 + vx * 0.45,
+      _engine.velocity.dy * 0.55 + vy * 0.45,
     ));
     _engine.pushTrailDense(n.dx, n.dy);
-    // FIX #1 - doubled force for faster orb response (38 -> 80)
-    _engine.velocityField.addForce(n.dx, n.dy, vx * 80.0, vy * 80.0, aspect: as);
+    // FIX: force raised to 100 for faster orb during quick swipes
+    _engine.velocityField.addForce(n.dx, n.dy, vx * 100.0, vy * 100.0, aspect: as);
     _orbX = n.dx; _orbY = n.dy;
   }
 

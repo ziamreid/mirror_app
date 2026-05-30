@@ -21,7 +21,6 @@ class _LanguageScreenState extends State<LanguageScreen>
   late AnimationController _fadeIn;
   final FluidController    _fluidCtrl = FluidController();
 
-  // Header proximity tracking
   final GlobalKey _headerKey = GlobalKey();
   double _headerProximity = 0.0;
   int    _headerFrameSkip = 0;
@@ -33,7 +32,6 @@ class _LanguageScreenState extends State<LanguageScreen>
       vsync: this,
       duration: const Duration(milliseconds: 1000),
     )..forward();
-    // Start tracking after first frame
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _fluidCtrl.repaint?.addListener(_onFrame);
     });
@@ -90,7 +88,6 @@ class _LanguageScreenState extends State<LanguageScreen>
 
   @override
   Widget build(BuildContext context) {
-    // FIX: header text darkens when orb is bright and close
     final t = ((_headerProximity - 0.45) / 0.40).clamp(0.0, 1.0);
     final headerColor = Color.lerp(AppTheme.textPrimary, const Color(0xFF1a0a2e), t)!;
     final hintColor   = Color.lerp(AppTheme.textHint,   const Color(0x991a0a2e), t)!;
@@ -109,7 +106,6 @@ class _LanguageScreenState extends State<LanguageScreen>
                 _maybeOrb(Text('EYE',
                     style: AppTheme.appNameStyle.copyWith(color: headerColor))),
                 const SizedBox(height: 6),
-                // FIX: header reacts to orb brightness
                 SizedBox(
                   key: _headerKey,
                   child: _maybeOrb(Text(
@@ -124,34 +120,34 @@ class _LanguageScreenState extends State<LanguageScreen>
                 Column(
                   children: [
                     _LangCard(
-                      label:        'ENGLISH',
-                      sublabel:     'speak to me clearly',
-                      icon:         const _USFlagIcon(),
-                      selected:     _selected == AppLanguage.english,
-                      onTap:        () => _onSelect(AppLanguage.english),
-                      fluidCtrl:    _fluidCtrl,
+                      label:         'ENGLISH',
+                      sublabel:      'speak to me clearly',
+                      icon:          const _EmojiIcon('🗽'),
+                      selected:      _selected == AppLanguage.english,
+                      onTap:         () => _onSelect(AppLanguage.english),
+                      fluidCtrl:     _fluidCtrl,
                       entranceDelay: 0,
                     ),
                     const SizedBox(height: 12),
                     _LangCard(
-                      label:        'FRANKO',
-                      sublabel:     'kalam 3adi zayak',
-                      icon:         const _FrankoIcon(),
-                      selected:     _selected == AppLanguage.franko,
-                      onTap:        () => _onSelect(AppLanguage.franko),
-                      fluidCtrl:    _fluidCtrl,
+                      label:         'FRANKO',
+                      sublabel:      'kalam 3adi zayak',
+                      icon:          const _FrankoIcon(),
+                      selected:      _selected == AppLanguage.franko,
+                      onTap:         () => _onSelect(AppLanguage.franko),
+                      fluidCtrl:     _fluidCtrl,
                       entranceDelay: 120,
-                      isFranko:     true,
+                      isFranko:      true,
                     ),
                     const SizedBox(height: 12),
                     _LangCard(
-                      label:        'عربي',
-                      sublabel:     'بالكلام الصريح',
-                      icon:         const _ArabicIcon(),
-                      selected:     _selected == AppLanguage.arabic,
-                      onTap:        () => _onSelect(AppLanguage.arabic),
-                      isArabic:     true,
-                      fluidCtrl:    _fluidCtrl,
+                      label:         'عربي',
+                      sublabel:      'بالكلام الصريح',
+                      icon:          const _ArabicIcon(),
+                      selected:      _selected == AppLanguage.arabic,
+                      onTap:         () => _onSelect(AppLanguage.arabic),
+                      isArabic:      true,
+                      fluidCtrl:     _fluidCtrl,
                       entranceDelay: 240,
                     ),
                   ],
@@ -286,22 +282,24 @@ class _LangCardState extends State<_LangCard> with TickerProviderStateMixin {
           child: child,
         ),
       ),
-      child: GestureDetector(
-        onTapDown:   (_) { _press.forward();  widget.fluidCtrl.lockOrb(); },
-        onTapUp:     (_) { _press.reverse();  widget.fluidCtrl.unlockOrb(); widget.onTap(); },
-        onTapCancel: ()  { _press.reverse();  widget.fluidCtrl.unlockOrb(); },
-        child: AnimatedBuilder(
-          animation: _press,
-          builder: (_, child) => Transform.scale(
-              scale: 1.0 - _press.value * 0.03, child: child),
-          child: _buildCard(),
+      child: Listener(
+        onPointerDown:   (_) { _press.forward();  widget.fluidCtrl.lockOrb(); },
+        onPointerUp:     (_) { _press.reverse();  widget.fluidCtrl.unlockOrb(); },
+        onPointerCancel: (_) { _press.reverse();  widget.fluidCtrl.unlockOrb(); },
+        child: GestureDetector(
+          onTap: widget.onTap,
+          child: AnimatedBuilder(
+            animation: _press,
+            builder: (_, child) => Transform.scale(
+                scale: 1.0 - _press.value * 0.03, child: child),
+            child: _buildCard(),
+          ),
         ),
       ),
     );
   }
 
   Widget _buildCard() {
-    // Text darkens when orb is bright
     final t = ((_proximity - 0.55) / 0.35).clamp(0.0, 1.0);
     final labelColor    = Color.lerp(AppTheme.textPrimary, const Color(0xFF1a0a2e), t)!;
     final sublabelColor = Color.lerp(AppTheme.textHint,    const Color(0x99200040), t)!;
@@ -351,7 +349,6 @@ class _LangCardState extends State<_LangCard> with TickerProviderStateMixin {
                 ],
               ),
               const Spacer(),
-              // FIX: Better selection indicator — animated circle checkmark
               AnimatedContainer(
                 duration: const Duration(milliseconds: 300),
                 curve: Curves.easeOutBack,
@@ -383,63 +380,12 @@ class _LangCardState extends State<_LangCard> with TickerProviderStateMixin {
 
 // ── Icons ─────────────────────────────────────────────────────────────────────
 
-class _USFlagIcon extends StatelessWidget {
-  const _USFlagIcon();
+class _EmojiIcon extends StatelessWidget {
+  final String emoji;
+  const _EmojiIcon(this.emoji);
   @override
-  Widget build(BuildContext context) => SizedBox(
-    width: 32, height: 22,
-    child: ClipRRect(
-      borderRadius: BorderRadius.circular(3),
-      child: CustomPaint(painter: _USFlagPainter()),
-    ),
-  );
-}
-
-class _USFlagPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size s) {
-    final w = s.width; final h = s.height;
-    final sh = h / 13;
-    for (int i = 0; i < 13; i++) {
-      canvas.drawRect(Rect.fromLTWH(0, i * sh, w, sh),
-          Paint()..color = i.isEven ? const Color(0xFFB22234) : Colors.white);
-    }
-    final cW = w * 0.385; final cH = sh * 7;
-    canvas.drawRect(Rect.fromLTWH(0, 0, cW, cH),
-        Paint()..color = const Color(0xFF3C3B6E));
-    final starPaint = Paint()..color = Colors.white;
-    const rows = 9;
-    final rowH = cH / rows;
-    for (int r = 0; r < rows; r++) {
-      final isEvenRow = r.isEven;
-      final cols = isEvenRow ? 6 : 5;
-      final colW = cW / (isEvenRow ? 6 : 5);
-      final offsetX = isEvenRow ? colW / 2 : colW;
-      for (int c = 0; c < cols; c++) {
-        _drawStar(canvas,
-            Offset(offsetX + c * colW, rowH / 2 + r * rowH), 1.1, starPaint);
-      }
-    }
-  }
-
-  void _drawStar(Canvas canvas, Offset center, double radius, Paint paint) {
-    final path = Path();
-    for (int i = 0; i < 5; i++) {
-      final angle = (i * 4 * pi / 5) - pi / 2;
-      final inner = radius * 0.4;
-      final innerAngle = angle + 2 * pi / 5;
-      final pt = Offset(center.dx + cos(angle) * radius,
-                        center.dy + sin(angle) * radius);
-      final ip = Offset(center.dx + cos(innerAngle) * inner,
-                        center.dy + sin(innerAngle) * inner);
-      if (i == 0) path.moveTo(pt.dx, pt.dy); else path.lineTo(pt.dx, pt.dy);
-      path.lineTo(ip.dx, ip.dy);
-    }
-    path.close();
-    canvas.drawPath(path, paint);
-  }
-
-  @override bool shouldRepaint(_) => false;
+  Widget build(BuildContext context) => Text(emoji,
+      style: const TextStyle(fontSize: 24, height: 1.0));
 }
 
 class _FrankoIcon extends StatelessWidget {

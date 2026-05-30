@@ -14,7 +14,8 @@ class TrailPoint {
 
 class FluidEngine {
   static const int kTrailLen      = 80;
-  static const double kTrailDecay = 0.035;
+  // FIX: raised decay so trail collapses faster on release
+  static const double kTrailDecay = 0.07;
   static const double kMinDist    = 0.007;
 
   Offset _touch      = const Offset(0.5, 0.5);
@@ -23,6 +24,9 @@ class FluidEngine {
   double _touchForce = 1.0;
   double _touchBurst = 0.0;
   bool   _touching   = false;
+
+  // Track speed for orb size scaling during fast flings
+  double _speed = 0.0;
 
   final List<TrailPoint> trail = List.generate(
       kTrailLen, (_) => TrailPoint(0.5, 0.35)..age = 0.0);
@@ -43,6 +47,8 @@ class FluidEngine {
       _touchForce = 1.0;
     } else {
       _touchForce = (_touchForce - dt * 1.2).clamp(0.0, 1.0);
+      // FIX: speed decays fast on release so orb shrinks quickly
+      _speed = (_speed - dt * 8.0).clamp(0.0, 1.0);
     }
     _touchBurst = (_touchBurst - dt * 4.0).clamp(0.0, 1.0);
     _velocity   = _velocity * 0.88;
@@ -68,7 +74,9 @@ class FluidEngine {
         final p   = trail[idx];
         if (p.age >= 1.0) continue;
         final trailPos   = i / (kTrailLen - 1).toDouble();
-        final pointDecay = kTrailDecay * 5.0 * (1.0 + trailPos * 2.5);
+        // FIX: much faster tail decay (was 5.0, now 10.0) so orb
+        // collapses quickly to idle size after release
+        final pointDecay = kTrailDecay * 10.0 * (1.0 + trailPos * 3.0);
         p.age = (p.age + dt * pointDecay).clamp(0.0, 1.0);
       }
     }
@@ -85,6 +93,7 @@ class FluidEngine {
       trail[i] = TrailPoint(nx, ny)..age = 0.0;
     }
     _trailHead = 28;
+    _speed = 0.0;
   }
 
   void pushTrailDense(double nx, double ny) {
@@ -94,6 +103,8 @@ class FluidEngine {
     final dx = nx - lx, dy = ny - ly;
     final dist = sqrt(dx * dx + dy * dy);
     if (dist < kMinDist) return;
+    // FIX: update speed from drag distance for orb size scaling
+    _speed = (_speed + dist * 12.0).clamp(0.0, 1.0);
     final steps = (dist / kMinDist).ceil().clamp(1, 20);
     for (int s = 1; s <= steps; s++) {
       final t = s / steps;
@@ -134,6 +145,7 @@ class FluidEngine {
 
   double get orbX => orbCenter.dx;
   double get orbY => orbCenter.dy;
+  double get speed => _speed;
 
   int    get trailHead  => _trailHead;
   bool   get touching   => _touching;
@@ -153,9 +165,6 @@ class FluidEngine {
 class FluidPainter extends CustomPainter {
   final FluidEngine engine;
   final Size        screenSize;
-  // teleportFade is baked directly into paint alpha here instead of
-  // using an Opacity() widget — Opacity forces a new compositing layer
-  // which breaks BackdropFilter in the glass cards above this painter.
   final double      teleportFade;
 
   FluidPainter({
@@ -176,7 +185,10 @@ class FluidPainter extends CustomPainter {
   }
 
   void _drawTrail(Canvas canvas, double fw, double fh) {
-    final auraR = fh * 0.21;
+    final baseR = fh * 0.21;
+    // FIX: orb grows with drag speed (up to 40% bigger during fast fling)
+    final speedBoost = 1.0 + engine.speed * 0.4;
+    final auraR = baseR * speedBoost;
 
     const double kSkipPx = 10.0;
     double lastDrawX = -9999, lastDrawY = -9999;
@@ -187,8 +199,9 @@ class FluidPainter extends CustomPainter {
       final p = engine.trail[idx];
       if (p.age >= 0.97) continue;
 
-      // Bake teleportFade into opacity directly — no Opacity widget needed
-      final op = (pow(1.0 - p.age, 1.8) as double) * teleportFade;
+      // FIX: steeper exponent (2.8 vs 1.8) — trail collapses much faster
+      // so the orb shrinks quickly back to idle after release
+      final op = (pow(1.0 - p.age, 2.8) as double) * teleportFade;
       if (op < 0.01) continue;
 
       final cx = p.x * fw;
