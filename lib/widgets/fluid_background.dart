@@ -229,7 +229,6 @@ class _FluidBackgroundState extends State<FluidBackground>
     final vx = e.delta.dx / _size.width;
     final vy = e.delta.dy / _size.height;
     _engine.setTouch(n);
-    // FIX: higher weight on new velocity (0.3 old, 0.7 new) for snappier flings
     _lastMoveVelocity = Offset(
       _lastMoveVelocity.dx * 0.3 + vx * 0.7,
       _lastMoveVelocity.dy * 0.3 + vy * 0.7,
@@ -239,7 +238,6 @@ class _FluidBackgroundState extends State<FluidBackground>
       _engine.velocity.dy * 0.55 + vy * 0.45,
     ));
     _engine.pushTrailDense(n.dx, n.dy);
-    // FIX: force raised to 100 for faster orb during quick swipes
     _engine.velocityField.addForce(n.dx, n.dy, vx * 100.0, vy * 100.0, aspect: as);
     _orbX = n.dx; _orbY = n.dy;
   }
@@ -277,16 +275,26 @@ class _FluidBackgroundState extends State<FluidBackground>
         onPointerCancel: _onPointerCancel,
         child: Stack(
           children: [
-            ValueListenableBuilder<int>(
-              valueListenable: _repaint,
-              builder: (_, __, ___) => CustomPaint(
-                painter: FluidPainter(
-                  engine: _engine, screenSize: _size,
-                  repaint: _repaint, teleportFade: _teleportFade,
+            // Layer 1: orb — isolated in its own RepaintBoundary so it
+            // repaints independently from the card widgets above it.
+            // Cards always render on top — orb illuminates from behind.
+            RepaintBoundary(
+              child: ValueListenableBuilder<int>(
+                valueListenable: _repaint,
+                builder: (_, __, ___) => CustomPaint(
+                  painter: FluidPainter(
+                    engine:       _engine,
+                    screenSize:   _size,
+                    repaint:      _repaint,
+                    teleportFade: _teleportFade,
+                  ),
+                  size: Size.infinite,
                 ),
-                size: Size.infinite,
               ),
             ),
+            // Layer 2: child UI (cards, text, etc.) — always on top of orb.
+            // BackdropFilter in each card blurs the orb layer underneath,
+            // creating the frosted-glass-over-light-source effect.
             if (widget.child != null) Positioned.fill(child: widget.child!),
           ],
         ),
