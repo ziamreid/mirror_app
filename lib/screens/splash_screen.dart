@@ -39,27 +39,31 @@ class _SplashScreenState extends State<SplashScreen>
     );
     _cardsCtrl = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 1400),
+      // FIX #4 — longer total duration so cards have time to glide in
+      // smoothly rather than cutting hard over the orb
+      duration: const Duration(milliseconds: 1600),
     );
     _headerAnim = CurvedAnimation(
       parent: _cardsCtrl,
-      curve: const Interval(0.00, 0.45, curve: Curves.easeOut),
+      curve: const Interval(0.00, 0.40, curve: Curves.easeOut),
     );
+    // FIX #4 — use easeOutCubic for each card so they decelerate
+    // smoothly as they settle into position over the orb
     _card0 = CurvedAnimation(
       parent: _cardsCtrl,
-      curve: const Interval(0.15, 0.60, curve: Curves.easeOutCubic),
+      curve: const Interval(0.12, 0.55, curve: Curves.easeOutCubic),
     );
     _card1 = CurvedAnimation(
       parent: _cardsCtrl,
-      curve: const Interval(0.28, 0.74, curve: Curves.easeOutCubic),
+      curve: const Interval(0.26, 0.70, curve: Curves.easeOutCubic),
     );
     _card2 = CurvedAnimation(
       parent: _cardsCtrl,
-      curve: const Interval(0.42, 0.88, curve: Curves.easeOutCubic),
+      curve: const Interval(0.40, 0.85, curve: Curves.easeOutCubic),
     );
     _subtext = CurvedAnimation(
       parent: _cardsCtrl,
-      curve: const Interval(0.70, 1.00, curve: Curves.easeOut),
+      curve: const Interval(0.72, 1.00, curve: Curves.easeOut),
     );
     _runSequence();
   }
@@ -117,19 +121,14 @@ class _SplashScreenState extends State<SplashScreen>
                   builder: (_, __) => Opacity(
                     opacity: _headerAnim.value,
                     child: Transform.translate(
-                      offset: Offset(0, 12 * (1 - _headerAnim.value)),
+                      offset: Offset(0, 14 * (1 - _headerAnim.value)),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
+                          // FIX #1 — use headlineStyle (w600) to match app font
                           Text(
                             'Choose your language',
-                            style: TextStyle(
-                              fontFamily: '.SF Pro Rounded',
-                              color: AppTheme.textPrimary,
-                              fontSize: 22,
-                              fontWeight: FontWeight.w600,
-                              letterSpacing: -0.4,
-                            ),
+                            style: AppTheme.headlineStyle.copyWith(fontSize: 22),
                           ),
                           const SizedBox(height: 6),
                           Text(
@@ -138,6 +137,7 @@ class _SplashScreenState extends State<SplashScreen>
                               color: AppTheme.textSecondary,
                               fontSize: 12,
                               letterSpacing: 0.2,
+                              fontWeight: FontWeight.w400,
                             ),
                           ),
                         ],
@@ -193,6 +193,7 @@ class _SplashScreenState extends State<SplashScreen>
                         style: AppTheme.labelStyle.copyWith(
                           color: AppTheme.textHint,
                           letterSpacing: 0.8,
+                          fontWeight: FontWeight.w400,
                         ),
                       ),
                     ),
@@ -245,7 +246,6 @@ class _MaterialCardState extends State<_MaterialCard>
   late Animation<double>   _sweepAnim;
   bool _sweptOnce = false;
 
-  // ── Orb proximity tracking ─────────────────────────────────────────────────
   final GlobalKey _key       = GlobalKey();
   Offset          _localOrb  = const Offset(0.5, 0.5);
   double          _proximity = 0.0;
@@ -268,7 +268,6 @@ class _MaterialCardState extends State<_MaterialCard>
     if (widget.hasShimmer) {
       widget.progress.addListener(_onProgressChange);
     }
-    // Start listening to orb position
     widget.repaint?.addListener(_onFrame);
   }
 
@@ -279,7 +278,6 @@ class _MaterialCardState extends State<_MaterialCard>
     }
   }
 
-  // Called every frame — compute how close the orb is to this card
   void _onFrame() {
     _frameSkip++;
     if (_frameSkip % 3 != 0) return;
@@ -342,12 +340,15 @@ class _MaterialCardState extends State<_MaterialCard>
       animation: widget.progress,
       builder: (_, child) {
         final t     = widget.progress.value;
-        final blur  = (1.0 - t) * 10.0;
-        final scale = 1.0 + (1.0 - t) * 0.055;
+        // FIX #4 — use a blur-only entrance (no scale) so the card
+        // materialises cleanly through the orb rather than scaling
+        // over it. Combine with a gentle vertical slide for elegance.
+        final blur  = (1.0 - t) * 12.0;
+        final slide = (1.0 - t) * 16.0;
         return Opacity(
           opacity: t.clamp(0.0, 1.0),
-          child: Transform.scale(
-            scale: scale,
+          child: Transform.translate(
+            offset: Offset(0, slide),
             child: ImageFiltered(
               imageFilter: ImageFilter.blur(
                 sigmaX: blur,
@@ -368,7 +369,7 @@ class _MaterialCardState extends State<_MaterialCard>
           builder: (_, child) =>
               Transform.scale(scale: 1.0 - _press.value * 0.03, child: child),
           child: SizedBox(
-            key: _key,   // ← key here for proximity measurement
+            key: _key,
             child: widget.hasShimmer
                 ? AnimatedBuilder(
                     animation: _sweepAnim,
@@ -408,8 +409,8 @@ class _MaterialCardState extends State<_MaterialCard>
 class _LiquidGlassCard extends StatelessWidget {
   final bool   selected;
   final double shimmer;
-  final double proximity;   // 0–1: how close the orb is
-  final Offset orbOffset;   // normalised orb position relative to card
+  final double proximity;
+  final Offset orbOffset;
   final Widget child;
 
   const _LiquidGlassCard({
@@ -422,18 +423,23 @@ class _LiquidGlassCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Orb tint bleeds through the glass proportional to proximity
+    // FIX #3 — base fill starts near-invisible, reacts to proximity
     final orbTint = Color.fromARGB(
       (proximity * 38).round().clamp(0, 255),
-      168, 85, 247,   // #a855f7 violet
+      168, 85, 247,
     );
+
+    // FIX #3 — border alpha starts near-zero (alpha 8) so there's
+    // no visible white ring when the orb is far away
+    final borderAlpha = selected
+        ? (20 + proximity * 140).round().clamp(0, 255)
+        : (8  + proximity * 160).round().clamp(0, 255);
 
     return SizedBox(
       height: 84,
       child: Stack(
         fit: StackFit.expand,
         children: [
-          // ── Layer 1: real frost blur — BackdropFilter sees the orb ────────
           ClipRRect(
             borderRadius: BorderRadius.circular(18),
             child: BackdropFilter(
@@ -441,29 +447,27 @@ class _LiquidGlassCard extends StatelessWidget {
               child: Container(
                 color: selected
                     ? Color.lerp(
-                        const Color(0x22a855f7),
-                        const Color(0x44a855f7),
+                        const Color(0x1Aa855f7),
+                        const Color(0x38a855f7),
                         proximity,
                       )
-                    // Base white frost + orb violet tint on proximity
                     : Color.lerp(
-                        const Color(0x1AFFFFFF),
+                        const Color(0x0AFFFFFF),   // near-zero at distance
                         orbTint,
                         proximity,
                       ),
               ),
             ),
           ),
-          // ── Layer 2: border brightens as orb approaches ───────────────────
           CustomPaint(
             painter: _LiquidGlassPainter(
-              selected:  selected,
-              shimmer:   shimmer,
-              proximity: proximity,
-              orbOffset: orbOffset,
+              selected:    selected,
+              shimmer:     shimmer,
+              proximity:   proximity,
+              orbOffset:   orbOffset,
+              borderAlpha: borderAlpha,
             ),
           ),
-          // ── Layer 3: content ──────────────────────────────────────────────
           child,
         ],
       ),
@@ -477,12 +481,14 @@ class _LiquidGlassPainter extends CustomPainter {
   final double shimmer;
   final double proximity;
   final Offset orbOffset;
+  final int    borderAlpha;
 
   const _LiquidGlassPainter({
     required this.selected,
     required this.shimmer,
     required this.proximity,
     required this.orbOffset,
+    required this.borderAlpha,
   });
 
   @override
@@ -514,9 +520,7 @@ class _LiquidGlassPainter extends CustomPainter {
       canvas.restore();
     }
 
-    // ── Orb specular: a soft glow patch where the orb sits behind the card ─
-    // This is the key Apple interaction — a radial highlight appears on the
-    // glass surface directly over the orb position, like light refracting.
+    // ── Orb specular: radial highlight where orb sits behind card ─────────
     if (proximity > 0.05) {
       final ox = orbOffset.dx * size.width;
       final oy = orbOffset.dy * size.height;
@@ -539,53 +543,58 @@ class _LiquidGlassPainter extends CustomPainter {
       canvas.restore();
     }
 
-    // ── Outer border — brightens toward orb side ──────────────────────────
-    // Border opacity increases on the side closest to the orb
-    final baseBorderAlpha  = selected ? 0xCC : 0xAA;
-    final proxBorderAlpha  = (baseBorderAlpha + proximity * 80).clamp(0, 255).toInt();
+    // ── FIX #2 — directional border: bright on orb-side, dim on far side ──
+    // Gradient direction tracks the orb position dynamically
+    final dirX = (orbOffset.dx - 0.5) * 2.0;
+    final dirY = (orbOffset.dy - 0.5) * 2.0;
+    final gBegin = Alignment(dirX.clamp(-1.0, 1.0), dirY.clamp(-1.0, 1.0));
+    final gEnd   = Alignment(-dirX.clamp(-1.0, 1.0), -dirY.clamp(-1.0, 1.0));
+
+    final dimAlpha = (borderAlpha * 0.12).round().clamp(0, 255);
+
     canvas.drawRRect(
       rrect,
       Paint()
         ..shader = LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
+          begin: gBegin,
+          end:   gEnd,
           colors: selected
               ? [
-                  Color.fromARGB(proxBorderAlpha, 168, 85,  247),
-                  Color.fromARGB((proxBorderAlpha * 0.6).round(), 168, 85, 247),
-                  Color.fromARGB((proxBorderAlpha * 0.1).round(), 168, 85, 247),
+                  Color.fromARGB(borderAlpha, 168, 85,  247),
+                  Color.fromARGB(dimAlpha,    168, 85,  247),
                 ]
               : [
-                  Color.fromARGB(proxBorderAlpha, 255, 255, 255),
-                  Color.fromARGB((proxBorderAlpha * 0.4).round(), 255, 255, 255),
-                  Color.fromARGB((proxBorderAlpha * 0.05).round(), 255, 255, 255),
+                  Color.fromARGB(borderAlpha, 220, 200, 255),
+                  Color.fromARGB(dimAlpha,    220, 200, 255),
                 ],
-          stops: const [0.0, 0.5, 1.0],
         ).createShader(rect)
         ..style       = PaintingStyle.stroke
-        ..strokeWidth = 1.0,
+        ..strokeWidth = proximity > 0.15 ? 1.1 : 0.7,
     );
 
     // ── Inner inset border ────────────────────────────────────────────────
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(
-        Rect.fromLTWH(1, 1, size.width - 2, size.height - 2),
-        const Radius.circular(17),
-      ),
-      Paint()
-        ..color       = Color.fromARGB(
-            (0x22 + (proximity * 0x22).round()).clamp(0, 255), 255, 255, 255)
-        ..style       = PaintingStyle.stroke
-        ..strokeWidth = 0.5,
-    );
+    if (proximity > 0.05) {
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(
+          Rect.fromLTWH(1, 1, size.width - 2, size.height - 2),
+          const Radius.circular(17),
+        ),
+        Paint()
+          ..color       = Color.fromARGB(
+              (proximity * 22).round().clamp(0, 255), 255, 255, 255)
+          ..style       = PaintingStyle.stroke
+          ..strokeWidth = 0.5,
+      );
+    }
   }
 
   @override
   bool shouldRepaint(_LiquidGlassPainter old) =>
-      old.selected  != selected  ||
-      old.shimmer   != shimmer   ||
-      old.proximity != proximity ||
-      old.orbOffset != orbOffset;
+      old.selected    != selected    ||
+      old.shimmer     != shimmer     ||
+      old.proximity   != proximity   ||
+      old.orbOffset   != orbOffset   ||
+      old.borderAlpha != borderAlpha;
 }
 
 // ── Card content ──────────────────────────────────────────────────────────────
@@ -618,23 +627,19 @@ class _CardContent extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.center,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // FIX #1 — use cardLabelStyle (w600) to match heading font
               orbWidget(Text(
                 label,
-                style: TextStyle(
-                  fontFamily:    '.SF Pro Rounded',
-                  color:         AppTheme.textPrimary,
-                  fontSize:      15,
-                  fontWeight:    selected ? FontWeight.w500 : FontWeight.w300,
+                style: AppTheme.cardLabelStyle.copyWith(
+                  fontWeight:    selected ? FontWeight.w700 : FontWeight.w600,
                   letterSpacing: isArabic ? 0.5 : 2.4,
                 ),
               )),
               const SizedBox(height: 3),
               orbWidget(Text(
                 sublabel,
-                style: AppTheme.labelStyle.copyWith(
-                  color:         AppTheme.textHint,
+                style: AppTheme.cardSublabelStyle.copyWith(
                   letterSpacing: isArabic ? 0.3 : 0.6,
-                  fontSize:      10,
                 ),
               )),
             ],
@@ -659,7 +664,7 @@ class _CardContent extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Icons
+// Icons (unchanged)
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _USFlagIcon extends StatelessWidget {

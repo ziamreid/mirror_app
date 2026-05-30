@@ -12,9 +12,7 @@ class AppTheme {
   static const Color textSecondary = Color(0x99FFFFFF);
   static const Color textHint      = Color(0x55FFFFFF);
 
-  // ── Font ──────────────────────────────────────────────────────────────────
-  // '.SF Pro Rounded' gives the soft pill-shaped glyphs visible in the
-  // reference screenshot (image 1). Falls back to system sans-serif on Android.
+  // ── Font — SF Pro Rounded throughout ─────────────────────────────────────
   static const String _font = '.SF Pro Rounded';
 
   // ── Glass card ────────────────────────────────────────────────────────────
@@ -37,47 +35,68 @@ class AppTheme {
         ),
       );
 
-  // ── Typography ────────────────────────────────────────────────────────────
+  // ── Typography — all SF Pro Rounded, consistent weight system ─────────────
+  // Display: w600 — matches "Choose your language" heading
+  // Body:    w400 — clean readable weight for all body text
+  // Label:   w500 — small caps / metadata
+
   static const TextStyle questionStyle = TextStyle(
-    fontFamily: _font,
-    color: textPrimary,
-    fontSize: 21,
-    fontWeight: FontWeight.w300,
+    fontFamily:    _font,
+    color:         textPrimary,
+    fontSize:      21,
+    fontWeight:    FontWeight.w600,   // unified with heading weight
     letterSpacing: -0.4,
-    height: 1.45,
+    height:        1.45,
   );
 
   static const TextStyle choiceStyle = TextStyle(
-    fontFamily: _font,
-    color: textPrimary,
-    fontSize: 15,
-    fontWeight: FontWeight.w400,
+    fontFamily:    _font,
+    color:         textPrimary,
+    fontSize:      15,
+    fontWeight:    FontWeight.w400,   // clean body weight
     letterSpacing: -0.1,
-    height: 1.4,
+    height:        1.4,
   );
 
   static const TextStyle labelStyle = TextStyle(
-    fontFamily: _font,
-    color: textSecondary,
-    fontSize: 11,
-    fontWeight: FontWeight.w500,
+    fontFamily:    _font,
+    color:         textSecondary,
+    fontSize:      11,
+    fontWeight:    FontWeight.w500,
     letterSpacing: 1.2,
   );
 
   static const TextStyle appNameStyle = TextStyle(
-    fontFamily: _font,
-    color: textPrimary,
-    fontSize: 30,
-    fontWeight: FontWeight.w200,
+    fontFamily:    _font,
+    color:         textPrimary,
+    fontSize:      30,
+    fontWeight:    FontWeight.w600,   // unified
     letterSpacing: 9,
   );
 
   static const TextStyle headlineStyle = TextStyle(
-    fontFamily: _font,
-    color: textPrimary,
-    fontSize: 27,
-    fontWeight: FontWeight.w200,
+    fontFamily:    _font,
+    color:         textPrimary,
+    fontSize:      27,
+    fontWeight:    FontWeight.w600,   // unified — matches "Choose your language"
     letterSpacing: -0.5,
-    height: 1.3,
+    height:        1.3,
+  );
+
+  // ── Card label style (used inside language cards) ─────────────────────────
+  static const TextStyle cardLabelStyle = TextStyle(
+    fontFamily:    _font,
+    color:         textPrimary,
+    fontSize:      15,
+    fontWeight:    FontWeight.w600,   // prominent, matches heading feel
+    letterSpacing: 2.4,
+  );
+
+  static const TextStyle cardSublabelStyle = TextStyle(
+    fontFamily:    _font,
+    color:         textHint,
+    fontSize:      10,
+    fontWeight:    FontWeight.w400,
+    letterSpacing: 0.6,
   );
 }

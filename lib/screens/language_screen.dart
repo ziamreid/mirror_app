@@ -87,6 +87,7 @@ class _LanguageScreenState extends State<LanguageScreen>
                       selected:  _selected == AppLanguage.english,
                       onTap:     () => _onSelect(AppLanguage.english),
                       fluidCtrl: _fluidCtrl,
+                      entranceDelay: 0,
                     ),
                     const SizedBox(height: 12),
                     _LangCard(
@@ -96,6 +97,7 @@ class _LanguageScreenState extends State<LanguageScreen>
                       selected:  _selected == AppLanguage.franko,
                       onTap:     () => _onSelect(AppLanguage.franko),
                       fluidCtrl: _fluidCtrl,
+                      entranceDelay: 120,
                     ),
                     const SizedBox(height: 12),
                     _LangCard(
@@ -106,6 +108,7 @@ class _LanguageScreenState extends State<LanguageScreen>
                       onTap:     () => _onSelect(AppLanguage.arabic),
                       isArabic:  true,
                       fluidCtrl: _fluidCtrl,
+                      entranceDelay: 240,
                     ),
                   ],
                 ),
@@ -138,6 +141,7 @@ class _LangCard extends StatefulWidget {
   final bool            isArabic;
   final VoidCallback    onTap;
   final FluidController fluidCtrl;
+  final int             entranceDelay;  // ms stagger for smooth entrance
 
   const _LangCard({
     required this.label,
@@ -146,6 +150,7 @@ class _LangCard extends StatefulWidget {
     required this.selected,
     required this.onTap,
     required this.fluidCtrl,
+    required this.entranceDelay,
     this.isArabic = false,
   });
 
@@ -154,10 +159,12 @@ class _LangCard extends StatefulWidget {
 }
 
 class _LangCardState extends State<_LangCard>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   late AnimationController _press;
-  // Key on a plain SizedBox — NOT on LiquidGlassCard
-  // This prevents the ghost rectangle artifact
+  late AnimationController _entrance;
+  late Animation<double>   _entranceFade;
+  late Animation<double>   _entranceSlide;
+
   final GlobalKey _key = GlobalKey();
 
   Offset _localOrb  = const Offset(0.5, 0.5);
@@ -173,6 +180,30 @@ class _LangCardState extends State<_LangCard>
       lowerBound: 0,
       upperBound: 1,
     );
+
+    // FIX #4 — smooth entrance animation
+    // Cards slide up gently and fade in with a stagger delay
+    // Using a longer duration + easeOutCubic so they glide over the orb
+    // instead of hard-cutting across it
+    _entrance = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 700),
+    );
+
+    _entranceFade = CurvedAnimation(
+      parent: _entrance,
+      curve: Curves.easeOut,
+    );
+
+    _entranceSlide = Tween<double>(begin: 18.0, end: 0.0).animate(
+      CurvedAnimation(parent: _entrance, curve: Curves.easeOutCubic),
+    );
+
+    // Staggered start
+    Future.delayed(Duration(milliseconds: widget.entranceDelay), () {
+      if (mounted) _entrance.forward();
+    });
+
     widget.fluidCtrl.repaint?.addListener(_onFrame);
   }
 
@@ -180,6 +211,7 @@ class _LangCardState extends State<_LangCard>
   void dispose() {
     widget.fluidCtrl.repaint?.removeListener(_onFrame);
     _press.dispose();
+    _entrance.dispose();
     super.dispose();
   }
 
@@ -232,24 +264,34 @@ class _LangCardState extends State<_LangCard>
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTapDown:   (_) => _press.forward(),
-      onTapUp:     (_) { _press.reverse(); widget.onTap(); },
-      onTapCancel: ()  => _press.reverse(),
-      child: AnimatedBuilder(
-        animation: _press,
-        builder: (_, child) => Transform.scale(
-          scale: 1.0 - _press.value * 0.03,
+    // FIX #4 — wrap in entrance animation
+    // AnimatedBuilder rebuilds smoothly on each frame of the entrance
+    return AnimatedBuilder(
+      animation: _entrance,
+      builder: (_, child) => Opacity(
+        opacity: _entranceFade.value.clamp(0.0, 1.0),
+        child: Transform.translate(
+          offset: Offset(0, _entranceSlide.value),
           child: child,
         ),
-        child: _buildCard(),
+      ),
+      child: GestureDetector(
+        onTapDown:   (_) => _press.forward(),
+        onTapUp:     (_) { _press.reverse(); widget.onTap(); },
+        onTapCancel: ()  => _press.reverse(),
+        child: AnimatedBuilder(
+          animation: _press,
+          builder: (_, child) => Transform.scale(
+            scale: 1.0 - _press.value * 0.03,
+            child: child,
+          ),
+          child: _buildCard(),
+        ),
       ),
     );
   }
 
   Widget _buildCard() {
-    // _key is on this plain SizedBox — pure measurement only
-    // LiquidGlassCard has NO key — eliminates the ghost rectangle
     return SizedBox(
       key:    _key,
       height: 84,
@@ -278,23 +320,16 @@ class _LangCardState extends State<_LangCard>
                 children: [
                   _orb(Text(
                     widget.label,
-                    style: TextStyle(
-                      fontFamily:    '.SF Pro Rounded',
-                      color:         AppTheme.textPrimary,
-                      fontSize:      16,
-                      fontWeight:    widget.selected
-                          ? FontWeight.w500
-                          : FontWeight.w300,
-                      letterSpacing: widget.isArabic ? 0.5 : 2.8,
+                    style: AppTheme.cardLabelStyle.copyWith(
+                      fontWeight:    widget.selected ? FontWeight.w700 : FontWeight.w600,
+                      letterSpacing: widget.isArabic ? 0.5 : 2.4,
                     ),
                   )),
                   const SizedBox(height: 4),
                   _orb(Text(
                     widget.sublabel,
-                    style: AppTheme.labelStyle.copyWith(
-                      color:         AppTheme.textHint,
+                    style: AppTheme.cardSublabelStyle.copyWith(
                       letterSpacing: widget.isArabic ? 0.3 : 0.7,
-                      fontSize:      10,
                     ),
                   )),
                 ],
