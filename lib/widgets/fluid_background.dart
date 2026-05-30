@@ -28,15 +28,15 @@ class FluidController {
   void _attach(_FluidBackgroundState s) => _state = s;
   void _detach() => _state = null;
   void setSpeed(double v) => _state?._targetSpeed = v;
-  void setMood(double v)  => _state?._targetMood  = v;
+  void setMood(double v) => _state?._targetMood = v;
 
-  FluidEngine?        get engine  => _state?._engine;
+  FluidEngine? get engine => _state?._engine;
   ValueNotifier<int>? get repaint => _state?._repaint;
 }
 
 // ─── Widget ───────────────────────────────────────────────────────────────────
 class FluidBackground extends StatefulWidget {
-  final Widget?          child;
+  final Widget? child;
   final FluidController? controller;
   const FluidBackground({super.key, this.child, this.controller});
   @override
@@ -47,33 +47,33 @@ class _FluidBackgroundState extends State<FluidBackground>
     with SingleTickerProviderStateMixin {
   late Ticker _ticker;
   double _prevT = 0.0;
-  Size   _size  = Size.zero;
+  Size _size = Size.zero;
 
-  final FluidEngine        _engine  = FluidEngine();
+  final FluidEngine _engine = FluidEngine();
   final ValueNotifier<int> _repaint = ValueNotifier<int>(0);
 
-  int?   _activePointer;
+  int? _activePointer;
   Offset _lastMoveVelocity = Offset.zero;
 
   // ── Oscillator ────────────────────────────────────────────────────────────
-  double _t   = 0.0;
-  double _wx  = 0.22, _wy  = 0.35;
-  double _px  = 0.0,  _py  = 0.0;
-  double _ax  = 0.30, _ay  = 0.22;
-  double _cx  = 0.50, _cy  = 0.40;
+  double _t = 0.0;
+  double _wx = 0.22, _wy = 0.35;
+  double _px = 0.0, _py = 0.0;
+  double _ax = 0.30, _ay = 0.22;
+  double _cx = 0.50, _cy = 0.40;
   double _tcx = 0.50, _tcy = 0.40;
   double _centerTimer = 8.0;
   double _orbX = 0.50, _orbY = 0.40;
 
   // ── Teleport ──────────────────────────────────────────────────────────────
-  double _teleportFade  = 1.0;
-  bool   _teleporting   = false;
+  double _teleportFade = 1.0;
+  bool _teleporting = false;
   double _teleportTimer = 0.0;
-  double _nextTeleport  = 20.0;
+  double _nextTeleport = 20.0;
 
   // ── Speed / mood ──────────────────────────────────────────────────────────
   double _currentSpeed = 1.0, _targetSpeed = 1.0;
-  double _currentMood  = 0.0, _targetMood  = 0.0;
+  double _currentMood = 0.0, _targetMood = 0.0;
 
   int _frameCnt = 0;
 
@@ -118,7 +118,10 @@ class _FluidBackgroundState extends State<FluidBackground>
   }
 
   void _rephaseToPosition(double x, double y) {
-    _cx = x; _cy = y; _tcx = x; _tcy = y;
+    _cx = x;
+    _cy = y;
+    _tcx = x;
+    _tcy = y;
     _px = -_wx * _t;
     _py = -_wy * _t;
   }
@@ -144,12 +147,12 @@ class _FluidBackgroundState extends State<FluidBackground>
   void _onTick(Duration elapsed) {
     if (_size == Size.zero) return;
     final nowSec = elapsed.inMicroseconds / 1_000_000.0;
-    final dt     = (nowSec - _prevT).clamp(0.0, 0.032);
+    final dt = (nowSec - _prevT).clamp(0.0, 0.032);
     _prevT = nowSec;
     _frameCnt++;
 
     _currentSpeed += (_targetSpeed - _currentSpeed) * dt * 2.5;
-    _currentMood  += (_targetMood  - _currentMood)  * dt * 2.5;
+    _currentMood += (_targetMood - _currentMood) * dt * 2.5;
 
     final eff = dt * _currentSpeed;
     _engine.tick(eff);
@@ -160,9 +163,9 @@ class _FluidBackgroundState extends State<FluidBackground>
 
       _nextTeleport -= dt;
       if (_nextTeleport <= 0 && !_teleporting) {
-        _teleporting   = true;
+        _teleporting = true;
         _teleportTimer = 0.0;
-        _nextTeleport  = 18.0 + _rng.nextDouble() * 10.0;
+        _nextTeleport = 18.0 + _rng.nextDouble() * 10.0;
       }
       if (_teleporting) {
         _teleportTimer += dt;
@@ -173,19 +176,20 @@ class _FluidBackgroundState extends State<FluidBackground>
           if (_teleportFade < 0.05) {
             final nx = 0.20 + _rng.nextDouble() * 0.60;
             final ny = 0.16 + _rng.nextDouble() * 0.46;
-            _orbX = nx; _orbY = ny;
+            _orbX = nx;
+            _orbY = ny;
             _rephaseToPosition(nx, ny);
             _engine.resetTrail(nx, ny);
           }
           _teleportFade = ((_teleportTimer - half) / half).clamp(0.0, 1.0);
         } else {
           _teleportFade = 1.0;
-          _teleporting  = false;
+          _teleporting = false;
         }
       }
 
-      final rawX    = _cx + _ax * sin(_wx * _t + _px);
-      final rawY    = _cy + _ay * sin(_wy * _t + _py);
+      final rawX = _cx + _ax * sin(_wx * _t + _px);
+      final rawY = _cy + _ay * sin(_wy * _t + _py);
       final targetX = rawX.clamp(0.10, 0.90);
       final targetY = rawY.clamp(0.12, 0.78);
 
@@ -197,12 +201,15 @@ class _FluidBackgroundState extends State<FluidBackground>
         final velX = _ax * _wx * cos(_wx * _t + _px) * 0.02 * _currentSpeed;
         final velY = _ay * _wy * cos(_wy * _t + _py) * 0.02 * _currentSpeed;
         _engine.velocityField.addForce(
-          _orbX, _orbY, velX, velY,
+          _orbX,
+          _orbY,
+          velX,
+          velY,
           aspect: _size.width / _size.height,
         );
       }
     } else {
-      _teleporting  = false;
+      _teleporting = false;
       _teleportFade = 1.0;
     }
 
@@ -237,8 +244,8 @@ class _FluidBackgroundState extends State<FluidBackground>
   void _onPointerDown(PointerDownEvent e) {
     if (_activePointer != null) return;
     _activePointer = e.pointer;
-    _teleporting   = false;
-    _teleportFade  = 1.0;
+    _teleporting = false;
+    _teleportFade = 1.0;
     if (_size == Size.zero) return;
     final n = _safeNorm(e.localPosition);
     _engine.resetTrail(n.dx, n.dy);
@@ -249,16 +256,20 @@ class _FluidBackgroundState extends State<FluidBackground>
     _engine.setVelocity(Offset.zero);
     _lastMoveVelocity = Offset.zero;
     _engine.velocityField.addForce(
-      n.dx, n.dy, 0, 0,
+      n.dx,
+      n.dy,
+      0,
+      0,
       aspect: _size.width / _size.height,
     );
-    _orbX = n.dx; _orbY = n.dy;
+    _orbX = n.dx;
+    _orbY = n.dy;
   }
 
   void _onPointerMove(PointerMoveEvent e) {
     if (e.pointer != _activePointer) return;
     if (_size == Size.zero) return;
-    final n  = _safeNorm(e.localPosition);
+    final n = _safeNorm(e.localPosition);
     final as = _size.width / _size.height;
     final vx = e.delta.dx / _size.width;
     final vy = e.delta.dy / _size.height;
@@ -267,16 +278,22 @@ class _FluidBackgroundState extends State<FluidBackground>
       _lastMoveVelocity.dx * 0.6 + vx * 0.4,
       _lastMoveVelocity.dy * 0.6 + vy * 0.4,
     );
-    _engine.setVelocity(Offset(
-      _engine.velocity.dx * 0.75 + vx * 0.25,
-      _engine.velocity.dy * 0.75 + vy * 0.25,
-    ));
+    _engine.setVelocity(
+      Offset(
+        _engine.velocity.dx * 0.75 + vx * 0.25,
+        _engine.velocity.dy * 0.75 + vy * 0.25,
+      ),
+    );
     _engine.pushTrailDense(n.dx, n.dy);
     _engine.velocityField.addForce(
-      n.dx, n.dy, vx * 38.0, vy * 38.0,
+      n.dx,
+      n.dy,
+      vx * 38.0,
+      vy * 38.0,
       aspect: as,
     );
-    _orbX = n.dx; _orbY = n.dy;
+    _orbX = n.dx;
+    _orbY = n.dy;
   }
 
   void _onPointerUp(PointerUpEvent e) {
@@ -310,42 +327,33 @@ class _FluidBackgroundState extends State<FluidBackground>
     return Scaffold(
       backgroundColor: Colors.black,
       body: Listener(
-        onPointerDown:  _onPointerDown,
-        onPointerMove:  _onPointerMove,
-        onPointerUp:    _onPointerUp,
+        onPointerDown: _onPointerDown,
+        onPointerMove: _onPointerMove,
+        onPointerUp: _onPointerUp,
         onPointerCancel: _onPointerCancel,
-        child: ValueListenableBuilder<int>(
-          valueListenable: _repaint,
-          builder: (_, __, ___) {
-            return Stack(
-              children: [
-                // ── BLACK BASE ───────────────────────────────────────────
-                // Painted as a widget so it's in the same compositing layer
-                // as the orb — BackdropFilter in cards CAN blur this layer
-                Positioned.fill(
-                  child: ColoredBox(color: Colors.black),
+        child: Stack(
+          children: [
+            // ── Orb + Cards in ONE layer — no Opacity wrapper ─────────────
+            // CRITICAL: Opacity() forces a new compositing layer which breaks
+            // BackdropFilter in child cards. Instead, teleportFade is passed
+            // directly into FluidPainter which bakes it into paint alpha.
+            // Both orb and cards now share the same compositing layer so
+            // BackdropFilter can actually see and blur the orb.
+            ValueListenableBuilder<int>(
+              valueListenable: _repaint,
+              builder: (_, __, ___) => CustomPaint(
+                painter: FluidPainter(
+                  engine: _engine,
+                  screenSize: _size,
+                  repaint: _repaint,
+                  teleportFade: _teleportFade,   // baked into alpha, no Opacity widget
                 ),
-
-                // ── ORB — NO Opacity wrapper, NO separate layer ──────────
-                // Opacity(opacity: x) forces a new layer → breaks BackdropFilter
-                // Instead we bake teleport fade into the painter's alpha
-                Positioned.fill(
-                  child: CustomPaint(
-                    painter: FluidPainter(
-                      engine:       _engine,
-                      screenSize:   _size,
-                      repaint:      _repaint,
-                      teleportFade: _teleportFade,   // painter handles fade
-                    ),
-                  ),
-                ),
-
-                // ── CARDS & UI — BackdropFilter NOW sees the orb layer ───
-                if (widget.child != null)
-                  Positioned.fill(child: widget.child!),
-              ],
-            );
-          },
+                size: Size.infinite,
+              ),
+            ),
+            // ── Cards / UI ────────────────────────────────────────────────
+            if (widget.child != null) Positioned.fill(child: widget.child!),
+          ],
         ),
       ),
     );

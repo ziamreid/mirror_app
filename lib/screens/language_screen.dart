@@ -81,30 +81,30 @@ class _LanguageScreenState extends State<LanguageScreen>
                 Column(
                   children: [
                     _LangCard(
-                      label:    'ENGLISH',
-                      sublabel: 'speak to me clearly',
-                      emoji:    '🌐',
-                      selected: _selected == AppLanguage.english,
-                      onTap:    () => _onSelect(AppLanguage.english),
+                      label:     'ENGLISH',
+                      sublabel:  'speak to me clearly',
+                      emoji:     '🌐',
+                      selected:  _selected == AppLanguage.english,
+                      onTap:     () => _onSelect(AppLanguage.english),
                       fluidCtrl: _fluidCtrl,
                     ),
                     const SizedBox(height: 12),
                     _LangCard(
-                      label:    'FRANKO',
-                      sublabel: 'kalam 3adi zayak',
-                      emoji:    '💬',
-                      selected: _selected == AppLanguage.franko,
-                      onTap:    () => _onSelect(AppLanguage.franko),
+                      label:     'FRANKO',
+                      sublabel:  'kalam 3adi zayak',
+                      emoji:     '💬',
+                      selected:  _selected == AppLanguage.franko,
+                      onTap:     () => _onSelect(AppLanguage.franko),
                       fluidCtrl: _fluidCtrl,
                     ),
                     const SizedBox(height: 12),
                     _LangCard(
-                      label:    'عربي',
-                      sublabel: 'بالكلام الصريح',
-                      emoji:    '✦',
-                      selected: _selected == AppLanguage.arabic,
-                      onTap:    () => _onSelect(AppLanguage.arabic),
-                      isArabic: true,
+                      label:     'عربي',
+                      sublabel:  'بالكلام الصريح',
+                      emoji:     '✦',
+                      selected:  _selected == AppLanguage.arabic,
+                      onTap:     () => _onSelect(AppLanguage.arabic),
+                      isArabic:  true,
                       fluidCtrl: _fluidCtrl,
                     ),
                   ],
@@ -129,8 +129,6 @@ class _LanguageScreenState extends State<LanguageScreen>
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Card wrapper
 // ─────────────────────────────────────────────────────────────────────────────
 class _LangCard extends StatefulWidget {
   final String          label;
@@ -158,6 +156,8 @@ class _LangCard extends StatefulWidget {
 class _LangCardState extends State<_LangCard>
     with SingleTickerProviderStateMixin {
   late AnimationController _press;
+  // Key on a plain SizedBox — NOT on LiquidGlassCard
+  // This prevents the ghost rectangle artifact
   final GlobalKey _key = GlobalKey();
 
   Offset _localOrb  = const Offset(0.5, 0.5);
@@ -248,74 +248,72 @@ class _LangCardState extends State<_LangCard>
   }
 
   Widget _buildCard() {
-    return LiquidGlassCard(
-      key:       _key,
-      selected:  widget.selected,
-      orbOffset: _localOrb,
-      proximity: _proximity,
-      height:    84,
-      // ── Content ────────────────────────────────────────────────────────
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 22),
-        child: Row(
-          children: [
-            // Emoji / icon
-            _orb(Text(
-              widget.emoji,
-              style: TextStyle(
-                fontSize: 20,
-                color: widget.selected
-                    ? AppTheme.midPurple
-                    : AppTheme.textSecondary,
+    // _key is on this plain SizedBox — pure measurement only
+    // LiquidGlassCard has NO key — eliminates the ghost rectangle
+    return SizedBox(
+      key:    _key,
+      height: 84,
+      child: LiquidGlassCard(
+        selected:  widget.selected,
+        orbOffset: _localOrb,
+        proximity: _proximity,
+        height:    84,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 22),
+          child: Row(
+            children: [
+              _orb(Text(
+                widget.emoji,
+                style: TextStyle(
+                  fontSize: 20,
+                  color: widget.selected
+                      ? AppTheme.midPurple
+                      : AppTheme.textSecondary,
+                ),
+              )),
+              const SizedBox(width: 16),
+              Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _orb(Text(
+                    widget.label,
+                    style: TextStyle(
+                      fontFamily:    '.SF Pro Rounded',
+                      color:         AppTheme.textPrimary,
+                      fontSize:      16,
+                      fontWeight:    widget.selected
+                          ? FontWeight.w500
+                          : FontWeight.w300,
+                      letterSpacing: widget.isArabic ? 0.5 : 2.8,
+                    ),
+                  )),
+                  const SizedBox(height: 4),
+                  _orb(Text(
+                    widget.sublabel,
+                    style: AppTheme.labelStyle.copyWith(
+                      color:         AppTheme.textHint,
+                      letterSpacing: widget.isArabic ? 0.3 : 0.7,
+                      fontSize:      10,
+                    ),
+                  )),
+                ],
               ),
-            )),
-            const SizedBox(width: 16),
-
-            // Label + sublabel
-            Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _orb(Text(
-                  widget.label,
-                  style: TextStyle(
-                    fontFamily: '.SF Pro Rounded',
-                    color:       AppTheme.textPrimary,
-                    fontSize:    16,
-                    fontWeight:  widget.selected
-                        ? FontWeight.w500
-                        : FontWeight.w300,
-                    letterSpacing: widget.isArabic ? 0.5 : 2.8,
+              const Spacer(),
+              AnimatedOpacity(
+                opacity:  widget.selected ? 1.0 : 0.0,
+                duration: const Duration(milliseconds: 200),
+                child: Container(
+                  width:  7,
+                  height: 7,
+                  decoration: const BoxDecoration(
+                    color: AppTheme.midPurple,
+                    shape: BoxShape.circle,
                   ),
-                )),
-                const SizedBox(height: 4),
-                _orb(Text(
-                  widget.sublabel,
-                  style: AppTheme.labelStyle.copyWith(
-                    color:         AppTheme.textHint,
-                    letterSpacing: widget.isArabic ? 0.3 : 0.7,
-                    fontSize:      10,
-                  ),
-                )),
-              ],
-            ),
-
-            const Spacer(),
-
-            // Selected dot
-            AnimatedOpacity(
-              opacity:  widget.selected ? 1.0 : 0.0,
-              duration: const Duration(milliseconds: 200),
-              child: Container(
-                width:  7,
-                height: 7,
-                decoration: const BoxDecoration(
-                  color: AppTheme.midPurple,
-                  shape: BoxShape.circle,
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -324,7 +322,7 @@ class _LangCardState extends State<_LangCard>
 
 // ─────────────────────────────────────────────────────────────────────────────
 PageRoute _smoothRoute(Widget page) => PageRouteBuilder(
-  pageBuilder:       (_, __, ___) => page,
+  pageBuilder:        (_, __, ___) => page,
   transitionDuration: const Duration(milliseconds: 500),
   transitionsBuilder: (_, anim, __, child) => FadeTransition(
     opacity: CurvedAnimation(parent: anim, curve: Curves.easeOut),
