@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:sensors_plus/sensors_plus.dart';
 import '../fluid_painter.dart';
 import '../velocity_field.dart';
 
@@ -63,10 +64,17 @@ class _FluidBackgroundState extends State<FluidBackground>
   double _teleportFade  = 1.0;
   bool   _teleporting   = false;
   double _teleportTimer = 0.0;
-  double _nextTeleport  = 20.0;
+  // Much rarer teleport: 60-90s instead of 18-28s
+  double _nextTeleport  = 60.0;
   double _currentSpeed = 1.0, _targetSpeed = 1.0;
   double _currentMood  = 0.0, _targetMood  = 0.0;
   int _frameCnt = 0;
+
+  // Gyroscope
+  double _gyroX = 0.0, _gyroY = 0.0;
+  static const double _kGyroDead   = 0.3;   // ignore tiny tremors
+  static const double _kGyroScale  = 0.012; // how much tilt moves orb
+  static const double _kGyroSmooth = 0.08;  // smoothing factor
 
   @override
   void initState() {
@@ -84,6 +92,23 @@ class _FluidBackgroundState extends State<FluidBackground>
     _engine.trailHeadSet(FluidEngine.kTrailLen - 1);
     _ticker = createTicker(_onTick);
     _ticker.start();
+    _startGyroscope();
+  }
+
+  void _startGyroscope() {
+    try {
+      accelerometerEventStream(samplingPeriod: SensorInterval.gameInterval)
+          .listen((e) {
+        // Dead zone — ignore tremors smaller than threshold
+        final rx = e.x.abs() < _kGyroDead ? 0.0 : e.x;
+        final ry = e.y.abs() < _kGyroDead ? 0.0 : e.y;
+        // Smooth into gyro accumulators
+        _gyroX += (rx - _gyroX) * _kGyroSmooth;
+        _gyroY += (ry - _gyroY) * _kGyroSmooth;
+      });
+    } catch (_) {
+      // Sensor not available — silently ignore
+    }
   }
 
   @override
@@ -139,14 +164,26 @@ class _FluidBackgroundState extends State<FluidBackground>
     if (!_engine.touching) {
       _t += dt * _currentSpeed;
       _driftCenter(dt);
+
+      // Apply gyroscope nudge — gentle, only when not touching
+      if (_gyroX.abs() > 0.01 || _gyroY.abs() > 0.01) {
+        // accelerometer x tilts phone left/right → move orb horizontally
+        // accelerometer y tilts phone forward/back → move orb vertically
+        // Negate x because tilting right gives negative x on accelerometer
+        _orbX = (_orbX - _gyroX * _kGyroScale * dt * 60).clamp(0.10, 0.90);
+        _orbY = (_orbY - _gyroY * _kGyroScale * dt * 60).clamp(0.12, 0.78);
+      }
+
+      // Teleport: much rarer (60-90s) and slower fade (0.6s each half)
       _nextTeleport -= dt;
       if (_nextTeleport <= 0 && !_teleporting) {
         _teleporting = true; _teleportTimer = 0.0;
-        _nextTeleport = 18.0 + _rng.nextDouble() * 10.0;
+        _nextTeleport = 60.0 + _rng.nextDouble() * 30.0;
       }
       if (_teleporting) {
         _teleportTimer += dt;
-        const half = 0.32;
+        // Slower fade: 0.6s fade-out, 0.6s fade-in (was 0.32s)
+        const half = 0.60;
         if (_teleportTimer < half) {
           _teleportFade = 1.0 - (_teleportTimer / half);
         } else if (_teleportTimer < half * 2) {
@@ -275,9 +312,6 @@ class _FluidBackgroundState extends State<FluidBackground>
         onPointerCancel: _onPointerCancel,
         child: Stack(
           children: [
-            // Layer 1: orb — isolated in its own RepaintBoundary so it
-            // repaints independently from the card widgets above it.
-            // Cards always render on top — orb illuminates from behind.
             RepaintBoundary(
               child: ValueListenableBuilder<int>(
                 valueListenable: _repaint,
@@ -292,9 +326,6 @@ class _FluidBackgroundState extends State<FluidBackground>
                 ),
               ),
             ),
-            // Layer 2: child UI (cards, text, etc.) — always on top of orb.
-            // BackdropFilter in each card blurs the orb layer underneath,
-            // creating the frosted-glass-over-light-source effect.
             if (widget.child != null) Positioned.fill(child: widget.child!),
           ],
         ),

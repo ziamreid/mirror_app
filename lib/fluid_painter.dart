@@ -176,11 +176,9 @@ class FluidPainter extends CustomPainter {
   }
 
   void _drawTrail(Canvas canvas, double fw, double fh) {
-    // Reduced base radius: 0.13 (was 0.21) — orb is now ~26% of screen height
-    // instead of ~42%. Smaller = faster to paint, less overdraw.
-    final baseR     = fh * 0.13;
-    // Speed boost capped at 0.25 (was 0.40) — still grows during flings
-    // but never balloons to the old large size.
+    // Slightly larger than before: 0.16 (was 0.13, original was 0.21)
+    // Sweet spot — visible but not bleeding over cards
+    final baseR      = fh * 0.16;
     final speedBoost = 1.0 + engine.speed * 0.25;
     final auraR      = baseR * speedBoost;
 
@@ -218,24 +216,9 @@ class FluidPainter extends CustomPainter {
             Offset(cx, cy), r,
             [
               const Color(0x00000000),
-              Color.fromARGB(
-                _a(op * 0.18),
-                _lerp(100, 240, pinkMix),
-                _lerp(0,   70,  pinkMix),
-                255,
-              ),
-              Color.fromARGB(
-                _a(op * 0.88),
-                _lerp(150, 255, pinkMix),
-                _lerp(0,   50,  pinkMix),
-                255,
-              ),
-              Color.fromARGB(
-                _a(op * 0.60),
-                _lerp(90,  210, pinkMix),
-                _lerp(0,   30,  pinkMix),
-                _lerp(210, 255, pinkMix),
-              ),
+              Color.fromARGB(_a(op * 0.18), _lerp(100, 240, pinkMix), _lerp(0, 70,  pinkMix), 255),
+              Color.fromARGB(_a(op * 0.88), _lerp(150, 255, pinkMix), _lerp(0, 50,  pinkMix), 255),
+              Color.fromARGB(_a(op * 0.60), _lerp(90,  210, pinkMix), _lerp(0, 30,  pinkMix), _lerp(210, 255, pinkMix)),
               const Color(0x00000000),
             ],
             [0.0, 0.20, 0.48, 0.75, 1.0],
