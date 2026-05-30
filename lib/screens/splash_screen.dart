@@ -504,37 +504,8 @@ class _FlameBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return CustomPaint(
-      painter: _GradientBorderPainter(),
-      child: const SizedBox(
-        width: 28,
-        height: 28,
-        child: Center(
-          child: Text('🔥', style: TextStyle(fontSize: 14, height: 1.0)),
-        ),
-      ),
-    );
+    return const Text('🔥', style: TextStyle(fontSize: 20, height: 1.0));
   }
-}
-
-class _GradientBorderPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final rect = Rect.fromLTWH(0, 0, size.width, size.height);
-    final paint = Paint()
-      ..shader = const LinearGradient(
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-        colors: [Color(0xFFFF6600), Color(0xFFCC0000)],
-      ).createShader(rect)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.2;
-    canvas.drawCircle(
-        Offset(size.width / 2, size.height / 2), size.width / 2 - 0.6, paint);
-  }
-
-  @override
-  bool shouldRepaint(_) => false;
 }
 
 // ── Glass card ────────────────────────────────────────────────────────────────
