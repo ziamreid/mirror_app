@@ -504,7 +504,7 @@ class _FlameBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Text('🔥', style: TextStyle(fontSize: 20, height: 1.0));
+    return const Text('🔥', style: TextStyle(fontSize: 22, height: 1.0));
   }
 }
 

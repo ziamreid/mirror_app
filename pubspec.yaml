@@ -11,14 +11,17 @@ dependencies:
     sdk: flutter
   cupertino_icons: ^1.0.8
   sensors_plus: ^4.0.2
+  lottie: ^3.1.0
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
-  sensors_plus: ^4.0.2
 
 flutter:
   uses-material-design: true
   shaders:
     - assets/shaders/fluid.frag
+  assets:
+    - assets/animations/
+
