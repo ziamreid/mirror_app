@@ -13,7 +13,7 @@ class TrailPoint {
 }
 
 class FluidEngine {
-  static const int kTrailLen  = 80;
+  static const int    kTrailLen   = 80;
   static const double kTrailDecay = 0.035;
   static const double kMinDist    = 0.007;
 
@@ -91,7 +91,7 @@ class FluidEngine {
     final lx = _lastPush.dx;
     final ly = _lastPush.dy;
     if (lx < 0) { forceTrailPoint(nx, ny); return; }
-    final dx = nx - lx, dy = ny - ly;
+    final dx   = nx - lx, dy = ny - ly;
     final dist = sqrt(dx * dx + dy * dy);
     if (dist < kMinDist) return;
     final steps = (dist / kMinDist).ceil().clamp(1, 20);
@@ -128,13 +128,11 @@ class FluidEngine {
 
   Offset get orbCenter {
     final idx = (_trailHead - 1 + kTrailLen) % kTrailLen;
-    final p   = trail[idx];
-    return Offset(p.x, p.y);
+    return Offset(trail[idx].x, trail[idx].y);
   }
 
-  double get orbX => orbCenter.dx;
-  double get orbY => orbCenter.dy;
-
+  double get orbX       => orbCenter.dx;
+  double get orbY       => orbCenter.dy;
   int    get trailHead  => _trailHead;
   bool   get touching   => _touching;
   Offset get touch      => _touch;
@@ -150,25 +148,37 @@ class FluidEngine {
   void setLastPush(double x, double y) => _lastPush = Offset(x, y);
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// FluidPainter — teleportFade baked into alpha (no Opacity widget needed)
+// This keeps the orb on the SAME compositing layer as everything else
+// so BackdropFilter in LiquidGlassCard can blur it correctly
+// ─────────────────────────────────────────────────────────────────────────────
 class FluidPainter extends CustomPainter {
   final FluidEngine engine;
   final Size        screenSize;
+  final double      teleportFade; // 0→1, replaces the old Opacity wrapper
 
   FluidPainter({
     required this.engine,
     required this.screenSize,
     required Listenable repaint,
+    this.teleportFade = 1.0,
   }) : super(repaint: repaint);
 
   @override
   void paint(Canvas canvas, Size size) {
-    canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height),
-        Paint()..color = const Color(0xFF000000));
+    // Black background — same layer as orb
+    canvas.drawRect(
+      Rect.fromLTWH(0, 0, size.width, size.height),
+      Paint()..color = const Color(0xFF000000),
+    );
+
+    if (teleportFade < 0.01) return;
     _drawTrail(canvas, size.width, size.height);
   }
 
   void _drawTrail(Canvas canvas, double fw, double fh) {
-    final auraR = fh * 0.15;
+    final auraR = fh * 0.21;
 
     const double kSkipPx = 10.0;
     double lastDrawX = -9999, lastDrawY = -9999;
@@ -179,7 +189,8 @@ class FluidPainter extends CustomPainter {
       final p = engine.trail[idx];
       if (p.age >= 0.97) continue;
 
-      final op = pow(1.0 - p.age, 1.8) as double;
+      // Bake teleportFade into opacity — no Opacity widget needed
+      final op = (pow(1.0 - p.age, 1.8) as double) * teleportFade;
       if (op < 0.01) continue;
 
       final cx = p.x * fw;
@@ -194,7 +205,11 @@ class FluidPainter extends CustomPainter {
       final trailPos   = i / FluidEngine.kTrailLen.toDouble();
       final radiusMult = 0.50 + trailPos * 0.55;
       final r          = auraR * radiusMult;
-      final pinkMix    = 0.25 + trailPos * 0.75;
+
+      final coreA  = _a(op * 1.00);
+      final midA   = _a(op * 0.82);
+      final outerA = _a(op * 0.45);
+      final rimA   = _a(op * 0.14);
 
       canvas.drawCircle(
         Offset(cx, cy), r,
@@ -203,36 +218,25 @@ class FluidPainter extends CustomPainter {
           ..shader    = ui.Gradient.radial(
             Offset(cx, cy), r,
             [
-              const Color(0x00000000),
-              Color.fromARGB(
-                _a(op * 0.18),
-                _lerp(100, 240, pinkMix),
-                _lerp(0,   70, pinkMix),
-                255,
-              ),
-              Color.fromARGB(
-                _a(op * 0.88),
-                _lerp(150, 255, pinkMix),
-                _lerp(0,   50, pinkMix),
-                255,
-              ),
-              Color.fromARGB(
-                _a(op * 0.60),
-                _lerp(90,  210, pinkMix),
-                _lerp(0,   30, pinkMix),
-                _lerp(210, 255, pinkMix),
-              ),
+              // White-hot core
+              Color.fromARGB(coreA,  255, 255, 255),
+              // Hot magenta-violet
+              Color.fromARGB(coreA,  233, 50,  220),
+              // Signature violet
+              Color.fromARGB(midA,   168, 85,  247),
+              // Deep purple
+              Color.fromARGB(outerA, 109, 40,  217),
+              // Faint indigo rim — critical: gives BackdropFilter color to blur
+              Color.fromARGB(rimA,   76,  29,  149),
               const Color(0x00000000),
             ],
-            [0.0, 0.20, 0.48, 0.75, 1.0],
+            [0.0, 0.08, 0.30, 0.55, 0.80, 1.0],
           ),
       );
     }
   }
 
   static int _a(double v) => (v * 255).clamp(0, 255).toInt();
-  static int _lerp(int a, int b, double t) =>
-      (a + (b - a) * t).round().clamp(0, 255);
 
   @override
   bool shouldRepaint(FluidPainter old) => true;

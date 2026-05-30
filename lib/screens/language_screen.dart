@@ -6,6 +6,7 @@ import '../models/app_theme.dart';
 import '../models/onboarding_data.dart';
 import '../widgets/fluid_background.dart';
 import '../widgets/orb_aware_text.dart';
+import '../widgets/liquid_glass_card.dart';
 import 'onboarding_screen.dart';
 
 class LanguageScreen extends StatefulWidget {
@@ -16,7 +17,7 @@ class LanguageScreen extends StatefulWidget {
 
 class _LanguageScreenState extends State<LanguageScreen>
     with SingleTickerProviderStateMixin {
-  AppLanguage?         _selected;
+  AppLanguage?             _selected;
   late AnimationController _fadeIn;
   final FluidController    _fluidCtrl = FluidController();
 
@@ -80,29 +81,29 @@ class _LanguageScreenState extends State<LanguageScreen>
                 Column(
                   children: [
                     _LangCard(
-                      label: 'ENGLISH',
+                      label:    'ENGLISH',
                       sublabel: 'speak to me clearly',
-                      emoji: '🌐',
+                      emoji:    '🌐',
                       selected: _selected == AppLanguage.english,
-                      onTap: () => _onSelect(AppLanguage.english),
+                      onTap:    () => _onSelect(AppLanguage.english),
                       fluidCtrl: _fluidCtrl,
                     ),
                     const SizedBox(height: 12),
                     _LangCard(
-                      label: 'FRANKO',
+                      label:    'FRANKO',
                       sublabel: 'kalam 3adi zayak',
-                      emoji: '💬',
+                      emoji:    '💬',
                       selected: _selected == AppLanguage.franko,
-                      onTap: () => _onSelect(AppLanguage.franko),
+                      onTap:    () => _onSelect(AppLanguage.franko),
                       fluidCtrl: _fluidCtrl,
                     ),
                     const SizedBox(height: 12),
                     _LangCard(
-                      label: 'عربي',
+                      label:    'عربي',
                       sublabel: 'بالكلام الصريح',
-                      emoji: '✦',
+                      emoji:    '✦',
                       selected: _selected == AppLanguage.arabic,
-                      onTap: () => _onSelect(AppLanguage.arabic),
+                      onTap:    () => _onSelect(AppLanguage.arabic),
                       isArabic: true,
                       fluidCtrl: _fluidCtrl,
                     ),
@@ -128,7 +129,9 @@ class _LanguageScreenState extends State<LanguageScreen>
   }
 }
 
-// ─── Card ─────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Card wrapper
+// ─────────────────────────────────────────────────────────────────────────────
 class _LangCard extends StatefulWidget {
   final String          label;
   final String          sublabel;
@@ -157,10 +160,9 @@ class _LangCardState extends State<_LangCard>
   late AnimationController _press;
   final GlobalKey _key = GlobalKey();
 
-  // Orb state — updated from listener, never during build
-  Offset _localOrb     = const Offset(0.5, 0.5);
-  double _proximity    = 0.0;
-  int    _frameSkip    = 0;
+  Offset _localOrb  = const Offset(0.5, 0.5);
+  double _proximity = 0.0;
+  int    _frameSkip = 0;
 
   @override
   void initState() {
@@ -182,7 +184,6 @@ class _LangCardState extends State<_LangCard>
   }
 
   void _onFrame() {
-    // Only update every 3rd frame — 60fps → 20fps for glass effect, plenty smooth
     _frameSkip++;
     if (_frameSkip % 3 != 0) return;
     if (!mounted) return;
@@ -199,18 +200,18 @@ class _LangCardState extends State<_LangCard>
     final screenSize = MediaQuery.of(context).size;
     final orbSx = engine.orbX * screenSize.width;
     final orbSy = engine.orbY * screenSize.height;
-    final pos  = box.localToGlobal(Offset.zero);
-    final sz   = box.size;
+    final pos   = box.localToGlobal(Offset.zero);
+    final sz    = box.size;
 
-    final lx = orbSx - pos.dx;
-    final ly = orbSy - pos.dy;
+    final lx  = orbSx - pos.dx;
+    final ly  = orbSy - pos.dy;
     final cdx = lx - sz.width  / 2;
     final cdy = ly - sz.height / 2;
+
     final dist    = sqrt(cdx * cdx + cdy * cdy);
     final maxDist = sz.width * 1.2;
     final prox    = (1.0 - dist / maxDist).clamp(0.0, 1.0);
 
-    // Only call setState when values actually changed meaningfully
     final newOrb = Offset(lx / sz.width, ly / sz.height);
     if ((prox - _proximity).abs() < 0.01 &&
         (newOrb.dx - _localOrb.dx).abs() < 0.01 &&
@@ -247,166 +248,83 @@ class _LangCardState extends State<_LangCard>
   }
 
   Widget _buildCard() {
-    const orbColor   = Color(0xFFc026d3);
-    final prox       = _proximity;
-    final glowAlpha  = prox * 0.35;
-    final rimAlpha   = prox * 0.55;
-    final rx         = (_localOrb.dx - 0.5) * 2.0;
-    final ry         = (_localOrb.dy - 0.5) * 2.0;
-
-    return SizedBox(
-      key: _key,
-      height: 84,
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          // ── Base glass (no BackdropFilter — works on all platforms) ──────
-          DecoratedBox(
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(18),
-              color: widget.selected
-                  ? const Color(0x2Aa855f7)
-                  : Color.lerp(
-                      const Color(0x22ffffff),
-                      orbColor.withOpacity(0.18),
-                      prox,
-                    ),
-            ),
-          ),
-
-          // ── Orb glow bleed ───────────────────────────────────────────────
-          if (prox > 0.02)
-            Positioned.fill(
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(18),
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: RadialGradient(
-                      center: Alignment(
-                        rx.clamp(-1.2, 1.2),
-                        ry.clamp(-1.2, 1.2),
-                      ),
-                      radius: 1.0,
-                      colors: [
-                        orbColor.withOpacity(glowAlpha),
-                        orbColor.withOpacity(glowAlpha * 0.4),
-                        Colors.transparent,
-                      ],
-                      stops: const [0.0, 0.5, 1.0],
-                    ),
-                  ),
-                ),
+    return LiquidGlassCard(
+      key:       _key,
+      selected:  widget.selected,
+      orbOffset: _localOrb,
+      proximity: _proximity,
+      height:    84,
+      // ── Content ────────────────────────────────────────────────────────
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 22),
+        child: Row(
+          children: [
+            // Emoji / icon
+            _orb(Text(
+              widget.emoji,
+              style: TextStyle(
+                fontSize: 20,
+                color: widget.selected
+                    ? AppTheme.midPurple
+                    : AppTheme.textSecondary,
               ),
-            ),
+            )),
+            const SizedBox(width: 16),
 
-          // ── Specular highlight ───────────────────────────────────────────
-          Positioned.fill(
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(18),
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment(
-                      (-0.6 + rx * 0.4).clamp(-1.0, 1.0),
-                      (-1.0 + ry * 0.3).clamp(-1.0, 1.0),
-                    ),
-                    end: const Alignment(0.6, 1.0),
-                    colors: [
-                      Colors.white.withOpacity(0.10 + rimAlpha * 0.15),
-                      Colors.white.withOpacity(0.03),
-                      Colors.transparent,
-                    ],
-                    stops: const [0.0, 0.4, 1.0],
-                  ),
-                ),
-              ),
-            ),
-          ),
-
-          // ── Border ───────────────────────────────────────────────────────
-          Positioned.fill(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(18),
-                border: Border.all(
-                  color: widget.selected
-                      ? AppTheme.midPurple
-                      : Color.lerp(
-                          AppTheme.glassBorder,
-                          orbColor.withOpacity(0.9),
-                          prox * 0.7,
-                        )!,
-                  width: widget.selected ? 1.2 : (0.7 + prox * 0.6),
-                ),
-              ),
-            ),
-          ),
-
-          // ── Content ───────────────────────────────────────────────────────
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 22),
-            child: Row(
+            // Label + sublabel
+            Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 _orb(Text(
-                  widget.emoji,
+                  widget.label,
                   style: TextStyle(
-                    fontSize: 20,
-                    color: widget.selected
-                        ? AppTheme.midPurple
-                        : AppTheme.textSecondary,
+                    fontFamily: '.SF Pro Rounded',
+                    color:       AppTheme.textPrimary,
+                    fontSize:    16,
+                    fontWeight:  widget.selected
+                        ? FontWeight.w500
+                        : FontWeight.w300,
+                    letterSpacing: widget.isArabic ? 0.5 : 2.8,
                   ),
                 )),
-                const SizedBox(width: 16),
-                Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _orb(Text(
-                      widget.label,
-                      style: TextStyle(
-                        fontFamily: '.SF Pro Rounded',
-                        color: AppTheme.textPrimary,
-                        fontSize: 16,
-                        fontWeight: widget.selected
-                            ? FontWeight.w500
-                            : FontWeight.w300,
-                        letterSpacing: widget.isArabic ? 0.5 : 2.8,
-                      ),
-                    )),
-                    const SizedBox(height: 4),
-                    _orb(Text(
-                      widget.sublabel,
-                      style: AppTheme.labelStyle.copyWith(
-                        color: AppTheme.textHint,
-                        letterSpacing: widget.isArabic ? 0.3 : 0.7,
-                        fontSize: 10,
-                      ),
-                    )),
-                  ],
-                ),
-                const Spacer(),
-                AnimatedOpacity(
-                  opacity:  widget.selected ? 1.0 : 0.0,
-                  duration: const Duration(milliseconds: 200),
-                  child: Container(
-                    width: 7, height: 7,
-                    decoration: const BoxDecoration(
-                      color: AppTheme.midPurple,
-                      shape: BoxShape.circle,
-                    ),
+                const SizedBox(height: 4),
+                _orb(Text(
+                  widget.sublabel,
+                  style: AppTheme.labelStyle.copyWith(
+                    color:         AppTheme.textHint,
+                    letterSpacing: widget.isArabic ? 0.3 : 0.7,
+                    fontSize:      10,
                   ),
-                ),
+                )),
               ],
             ),
-          ),
-        ],
+
+            const Spacer(),
+
+            // Selected dot
+            AnimatedOpacity(
+              opacity:  widget.selected ? 1.0 : 0.0,
+              duration: const Duration(milliseconds: 200),
+              child: Container(
+                width:  7,
+                height: 7,
+                decoration: const BoxDecoration(
+                  color: AppTheme.midPurple,
+                  shape: BoxShape.circle,
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
 PageRoute _smoothRoute(Widget page) => PageRouteBuilder(
-  pageBuilder: (_, __, ___) => page,
+  pageBuilder:       (_, __, ___) => page,
   transitionDuration: const Duration(milliseconds: 500),
   transitionsBuilder: (_, anim, __, child) => FadeTransition(
     opacity: CurvedAnimation(parent: anim, curve: Curves.easeOut),
