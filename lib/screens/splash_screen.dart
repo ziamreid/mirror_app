@@ -292,7 +292,8 @@ class _MaterialCardState extends State<_MaterialCard>
   late Animation<double>   _sweepAnim;
   late Animation<double>   _badgeScale;
   late Animation<double>   _periodicShineAnim;
-  bool   _sweptOnce  = false;
+  bool   _sweptOnce    = false;
+  bool   _shineForward = true;
   bool   _badgeDone  = false;
   Timer? _shineTimer;
   final  GlobalKey _key = GlobalKey();
@@ -300,21 +301,25 @@ class _MaterialCardState extends State<_MaterialCard>
   double _proximity = 0.0;
   int    _frameSkip = 0;
 
+  // Shimmer animation duration — used to compute the idle gap so that
+  // forward + reverse + gap = exactly 8 seconds total cycle.
+  static const _shineDuration  = Duration(milliseconds: 900);
+  static const _shineGap       = Duration(milliseconds: 6200); // 900+900+6200 = 8000ms
+
   @override
   void initState() {
     super.initState();
     _press = AnimationController(vsync: this,
         duration: const Duration(milliseconds: 110), lowerBound: 0, upperBound: 1);
-    _sweep = AnimationController(vsync: this,
-        duration: const Duration(milliseconds: 800));
+    _sweep = AnimationController(vsync: this, duration: _shineDuration);
     _sweepAnim = CurvedAnimation(parent: _sweep, curve: Curves.easeInOut);
 
     _badgeCtrl = AnimationController(vsync: this,
         duration: const Duration(milliseconds: 500));
     _badgeScale = CurvedAnimation(parent: _badgeCtrl, curve: Curves.elasticOut);
 
-    _periodicShine = AnimationController(vsync: this,
-        duration: const Duration(milliseconds: 900));
+    _periodicShine = AnimationController(vsync: this, duration: _shineDuration);
+    _periodicShine.addStatusListener(_onShineStatus);
     _periodicShineAnim = CurvedAnimation(
         parent: _periodicShine, curve: Curves.easeInOut);
 
@@ -322,19 +327,26 @@ class _MaterialCardState extends State<_MaterialCard>
     widget.repaint?.addListener(_onFrame);
 
     if (widget.isFranko) {
+      // First shine fires 2s after the card appears, then every 8s thereafter.
       _shineTimer = Timer(const Duration(seconds: 2), _startPeriodicShine);
     }
   }
 
+  /// Runs one full shine sweep (forward → reverse) then schedules the next
   void _startPeriodicShine() {
     if (!mounted) return;
-    _periodicShine.forward().then((_) {
-      if (!mounted) return;
-      _periodicShine.reverse().then((_) {
-        if (!mounted) return;
-        _shineTimer = Timer(const Duration(seconds: 6), _startPeriodicShine);
-      });
-    });
+    _shineForward = true;
+    _periodicShine.forward(from: 0);
+  }
+
+  void _onShineStatus(AnimationStatus status) {
+    if (!mounted) return;
+    if (status == AnimationStatus.completed && _shineForward) {
+      _shineForward = false;
+      _periodicShine.reverse();
+    } else if (status == AnimationStatus.dismissed && !_shineForward) {
+      _shineTimer = Timer(_shineGap, _startPeriodicShine);
+    }
   }
 
   void _onProgressChange() {
@@ -379,6 +391,7 @@ class _MaterialCardState extends State<_MaterialCard>
   @override
   void dispose() {
     _shineTimer?.cancel();
+    _periodicShine.removeStatusListener(_onShineStatus);
     widget.repaint?.removeListener(_onFrame);
     if (widget.hasShimmer) widget.progress.removeListener(_onProgressChange);
     _press.dispose();
@@ -434,6 +447,7 @@ class _MaterialCardState extends State<_MaterialCard>
                       ? AnimatedBuilder(
                           animation: Listenable.merge([_sweepAnim, _periodicShineAnim]),
                           builder: (_, child) {
+                            // Use whichever shimmer value is larger at any moment
                             final shimmerVal = _sweepAnim.value > _periodicShineAnim.value
                                 ? _sweepAnim.value
                                 : _periodicShineAnim.value;
@@ -467,7 +481,6 @@ class _MaterialCardState extends State<_MaterialCard>
                               child: _buildContent(),
                             ),
                 ),
-                // Flame badge — Franko only, static red/orange, no border
                 if (widget.isFranko)
                   Positioned(
                     top: -14,
@@ -497,11 +510,8 @@ class _MaterialCardState extends State<_MaterialCard>
 }
 
 // ── Flame badge ───────────────────────────────────────────────────────────────
-// Static flame matching the reference image: wide base, swept curl top-right,
-// inner white teardrop highlight. No border, no reactivity.
 class _FlameBadge extends StatelessWidget {
   const _FlameBadge();
-
   @override
   Widget build(BuildContext context) {
     return const Text('🔥', style: TextStyle(fontSize: 22, height: 1.0));
