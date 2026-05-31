@@ -135,13 +135,23 @@ class FluidEngine {
     return Offset(trail[idx].x, trail[idx].y);
   }
 
-  double get orbX      => orbCenter.dx;
-  double get orbY      => orbCenter.dy;
-  double get speed     => _speed;
-  int    get trailHead => _trailHead;
-  bool   get touching  => _touching;
-  Offset get touch     => _touch;
-  Offset get velocity  => _velocity;
+  double get orbX       => orbCenter.dx;
+  double get orbY       => orbCenter.dy;
+
+  /// Seeds the orb to a specific position without animating.
+  /// Call this when navigating between screens so the orb doesn't jump.
+  void seedOrb(double x, double y) {
+    final idx = (_trailHead - 1 + kTrailLen) % kTrailLen;
+    trail[idx].x = x;
+    trail[idx].y = y;
+    _lastPush = Offset(x, y);
+  }
+
+  double get speed      => _speed;
+  int    get trailHead  => _trailHead;
+  bool   get touching   => _touching;
+  Offset get touch      => _touch;
+  Offset get velocity   => _velocity;
   double get touchForce => _touchForce;
   double get touchBurst => _touchBurst;
 
@@ -176,8 +186,6 @@ class FluidPainter extends CustomPainter {
   }
 
   void _drawTrail(Canvas canvas, double fw, double fh) {
-    // Slightly larger than before: 0.16 (was 0.13, original was 0.21)
-    // Sweet spot — visible but not bleeding over cards
     final baseR      = fh * 0.16;
     final speedBoost = 1.0 + engine.speed * 0.25;
     final auraR      = baseR * speedBoost;

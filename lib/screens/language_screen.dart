@@ -81,8 +81,16 @@ class _LanguageScreenState extends State<LanguageScreen>
     Future.delayed(const Duration(milliseconds: 650), () {
       if (!mounted) return;
       _fluidCtrl.setSpeed(1.0);
+      // ── Pass current orb position so OnboardingScreen starts seamlessly ──
+      final engine = _fluidCtrl.engine;
+      final orbX   = engine?.orbX ?? 0.5;
+      final orbY   = engine?.orbY ?? 0.5;
       Navigator.of(context).push(
-        _blurDissolveRoute(OnboardingScreen(language: lang)),
+        _blurDissolveRoute(OnboardingScreen(
+          language:    lang,
+          initialOrbX: orbX,
+          initialOrbY: orbY,
+        )),
       );
     });
   }
@@ -227,12 +235,12 @@ class _LangCardState extends State<_LangCard> with TickerProviderStateMixin {
   double _proximity = 0.0;
   int    _frameSkip = 0;
 
-  // Wall-clock shimmer for FRANKO
-  static const _shineCycleMs = 8000.0;
-  static const _shineHalfMs  = 900.0;
+  // Wall-clock shimmer for FRANKO — fixed timing
+  static const double _shineCycleMs = 8000.0;
+  static const double _shineHalfMs  = 900.0;
   double    _shineElapsed  = 0.0;
   DateTime? _lastFrameTime;
-  bool      _shineStarted  = false;
+  bool      _shineActive   = false; // true after first delay completes
   double    _shineValue    = 0.0;
 
   @override
@@ -255,12 +263,15 @@ class _LangCardState extends State<_LangCard> with TickerProviderStateMixin {
     });
 
     if (widget.isFranko) {
+      // First shine: entrance delay + animation (700ms) + 2s pause
       final firstDelay = widget.entranceDelay + 700 + 2000;
       Future.delayed(Duration(milliseconds: firstDelay), () {
-        if (mounted) {
-          _shineStarted  = true;
+        if (!mounted) return;
+        setState(() {
+          _shineActive   = true;
           _lastFrameTime = DateTime.now();
-        }
+          _shineElapsed  = 0.0; // start fresh at the shine peak
+        });
       });
     }
 
@@ -280,58 +291,65 @@ class _LangCardState extends State<_LangCard> with TickerProviderStateMixin {
   void _onFrame() {
     if (!mounted) return;
 
-    // Shimmer tick
-    if (widget.isFranko && _shineStarted) {
+    bool needsRebuild = false;
+
+    // ── Shimmer tick (wall-clock driven, not frame-rate) ──────────────────────
+    if (widget.isFranko && _shineActive) {
       final now  = DateTime.now();
       final dtMs = _lastFrameTime != null
           ? now.difference(_lastFrameTime!).inMicroseconds / 1000.0
-          : 0.0;
+          : 16.0;
       _lastFrameTime = now;
       _shineElapsed  = (_shineElapsed + dtMs) % _shineCycleMs;
 
-      _shineValue = _shineElapsed < _shineHalfMs
-          ? _shineElapsed / _shineHalfMs
+      // Shine window: first _shineHalfMs*2 of every cycle; dark otherwise
+      final newShine = _shineElapsed < _shineHalfMs
+          ? _shineElapsed / _shineHalfMs                          // 0→1
           : _shineElapsed < _shineHalfMs * 2
-              ? 1.0 - ((_shineElapsed - _shineHalfMs) / _shineHalfMs)
-              : 0.0;
+              ? 1.0 - ((_shineElapsed - _shineHalfMs) / _shineHalfMs) // 1→0
+              : 0.0;                                               // dark
+
+      if ((newShine - _shineValue).abs() > 0.005) {
+        _shineValue  = newShine;
+        needsRebuild = true;
+      }
     }
 
-    // Proximity (every 3rd frame)
+    // ── Proximity (every 3rd frame) ───────────────────────────────────────────
     _frameSkip++;
-    if (_frameSkip % 3 != 0) {
-      if (widget.isFranko && _shineStarted) setState(() {});
-      return;
+    if (_frameSkip % 3 == 0) {
+      final engine = widget.fluidCtrl.engine;
+      if (engine != null) {
+        final ctx = _key.currentContext;
+        if (ctx != null) {
+          final box = ctx.findRenderObject() as RenderBox?;
+          if (box != null && box.hasSize) {
+            final screenSize = MediaQuery.of(context).size;
+            final orbSx = engine.orbX * screenSize.width;
+            final orbSy = engine.orbY * screenSize.height;
+            final pos   = box.localToGlobal(Offset.zero);
+            final sz    = box.size;
+            final lx    = orbSx - pos.dx;
+            final ly    = orbSy - pos.dy;
+            final cdx   = lx - sz.width  / 2;
+            final cdy   = ly - sz.height / 2;
+            final dist  = sqrt(cdx * cdx + cdy * cdy);
+            final prox  = (1.0 - dist / (sz.width * 1.2)).clamp(0.0, 1.0);
+            final newOrb = Offset(lx / sz.width, ly / sz.height);
+
+            if ((newOrb.dx - _localOrb.dx).abs() > 0.01 ||
+                (newOrb.dy - _localOrb.dy).abs() > 0.01 ||
+                (prox - _proximity).abs() >= 0.01) {
+              _localOrb  = newOrb;
+              _proximity = prox;
+              needsRebuild = true;
+            }
+          }
+        }
+      }
     }
 
-    final engine = widget.fluidCtrl.engine;
-    if (engine == null) return;
-    final ctx = _key.currentContext;
-    if (ctx == null) return;
-    final box = ctx.findRenderObject() as RenderBox?;
-    if (box == null || !box.hasSize) return;
-    final screenSize = MediaQuery.of(context).size;
-    final orbSx = engine.orbX * screenSize.width;
-    final orbSy = engine.orbY * screenSize.height;
-    final pos   = box.localToGlobal(Offset.zero);
-    final sz    = box.size;
-    final lx    = orbSx - pos.dx;
-    final ly    = orbSy - pos.dy;
-    final cdx   = lx - sz.width  / 2;
-    final cdy   = ly - sz.height / 2;
-    final dist  = sqrt(cdx * cdx + cdy * cdy);
-    final prox  = (1.0 - dist / (sz.width * 1.2)).clamp(0.0, 1.0);
-    final newOrb = Offset(lx / sz.width, ly / sz.height);
-
-    final changed = (newOrb.dx - _localOrb.dx).abs() > 0.01 ||
-        (newOrb.dy - _localOrb.dy).abs() > 0.01 ||
-        (prox - _proximity).abs() >= 0.01;
-
-    if (changed || (widget.isFranko && _shineStarted)) {
-      setState(() {
-        _localOrb = newOrb;
-        _proximity = prox;
-      });
-    }
+    if (needsRebuild) setState(() {});
   }
 
   Widget _orb(Widget child) {

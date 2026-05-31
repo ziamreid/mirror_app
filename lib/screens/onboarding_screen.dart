@@ -11,7 +11,14 @@ import 'processing_screen.dart';
 
 class OnboardingScreen extends StatefulWidget {
   final AppLanguage language;
-  const OnboardingScreen({super.key, required this.language});
+  final double initialOrbX;
+  final double initialOrbY;
+  const OnboardingScreen({
+    super.key,
+    required this.language,
+    this.initialOrbX = 0.5,
+    this.initialOrbY = 0.5,
+  });
 
   @override
   State<OnboardingScreen> createState() => _OnboardingScreenState();
@@ -37,13 +44,13 @@ class _OnboardingScreenState extends State<OnboardingScreen>
   late Animation<double> _introOpacity;
 
   // Skip swipe state
-  late AnimationController _skipCtrl;
-  double _dragAccum      = 0.0;
-  bool   _hapticFired    = false;
-  bool   _skipCommitted  = false; // true only after haptic AND velocity going right
+  late AnimationController _skipSnapCtrl;
+  double _dragAccum     = 0.0;
+  bool   _hapticFired   = false;
+  bool   _skipDone      = false; // true only after we actually commit to skip
   static const double _swipeThreshold = 120.0;
   static const double _skipBtnWidth   = 80.0;
-  static const double _skipGap        = 8.0;
+  static const double _skipGap        = 12.0; // gap between skip btn and card
 
   // Physical screen size — immune to keyboard resize
   Size _screenSize = Size.zero;
@@ -72,8 +79,13 @@ class _OnboardingScreenState extends State<OnboardingScreen>
     _introOpacity =
         CurvedAnimation(parent: _introCtrl, curve: Curves.easeOut);
 
-    _skipCtrl = AnimationController(
+    _skipSnapCtrl = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 200));
+
+    // Seed orb to match where it was on the previous screen so it doesn't jump
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _fluidCtrl.engine?.seedOrb(widget.initialOrbX, widget.initialOrbY);
+    });
   }
 
   @override
@@ -91,7 +103,7 @@ class _OnboardingScreenState extends State<OnboardingScreen>
   void dispose() {
     _cardCtrl.dispose();
     _introCtrl.dispose();
-    _skipCtrl.dispose();
+    _skipSnapCtrl.dispose();
     super.dispose();
   }
 
@@ -127,7 +139,7 @@ class _OnboardingScreenState extends State<OnboardingScreen>
     };
     _fluidCtrl.setSpeed(choice.fluidSpeed);
     _fluidCtrl.setMood(choice.fluidMood);
-    _dismissSkip();
+    _resetSkip();
     _advanceQuestion();
   }
 
@@ -137,7 +149,7 @@ class _OnboardingScreenState extends State<OnboardingScreen>
       'choice': '__skipped__',
       'tags':   ['skipped'],
     };
-    _dismissSkip();
+    _resetSkip();
     _advanceQuestion();
   }
 
@@ -151,51 +163,67 @@ class _OnboardingScreenState extends State<OnboardingScreen>
     _advanceQuestion();
   }
 
-  void _dismissSkip() {
-    _skipCommitted = false;
-    _skipCtrl.animateTo(0.0,
-        duration: const Duration(milliseconds: 200), curve: Curves.easeIn);
-    setState(() { _dragAccum = 0; _hapticFired = false; });
+  void _resetSkip() {
+    _skipDone    = false;
+    _hapticFired = false;
+    _dragAccum   = 0;
+    _skipSnapCtrl.value = 0.0;
   }
 
-  void _onCardDragUpdate(DragUpdateDetails d) {
-    if (_transitioning || _skipCommitted) return;
-    final newAccum = (_dragAccum + d.delta.dx).clamp(0.0, _skipBtnWidth + _skipGap + 40.0);
-    if (newAccum < 0) return;
-    setState(() => _dragAccum = newAccum);
-    _skipCtrl.value = (newAccum / (_skipBtnWidth + _skipGap)).clamp(0.0, 1.0);
+  // ── Skip drag logic ──────────────────────────────────────────────────────────
+  // Key fix: we track whether the finger is currently moving RIGHT (positive dx)
+  // when haptic fires. We only commit to skip on drag-END if _skipDone is true,
+  // which is set only when finger is still moving right at release.
+  // Swiping back left after haptic clears _hapticFired and snaps back.
 
-    if (newAccum >= _swipeThreshold && !_hapticFired) {
+  void _onCardDragUpdate(DragUpdateDetails d) {
+    if (_transitioning || _skipDone) return;
+
+    final newAccum = (_dragAccum + d.delta.dx)
+        .clamp(0.0, _skipBtnWidth + _skipGap + 60.0);
+    setState(() => _dragAccum = newAccum);
+    _skipSnapCtrl.value =
+        (newAccum / (_skipBtnWidth + _skipGap)).clamp(0.0, 1.0);
+
+    // Fire haptic when crossing threshold going RIGHT
+    if (newAccum >= _swipeThreshold && !_hapticFired && d.delta.dx > 0) {
       _hapticFired = true;
       HapticFeedback.mediumImpact();
+    }
+
+    // If user swipes BACK left after haptic — reset haptic so snap-back works
+    if (_hapticFired && d.delta.dx < -8) {
+      _hapticFired = false;
     }
   }
 
   void _onCardDragEnd(DragEndDetails d) {
-    // Only skip if haptic fired AND finger is still moving right (positive velocity)
-    final goingRight = d.velocity.pixelsPerSecond.dx > -200;
-    if (_hapticFired && goingRight) {
-      _skipCommitted = true;
-      _skipCtrl
+    if (_skipDone) return;
+
+    final vel = d.velocity.pixelsPerSecond.dx;
+    // Only skip if haptic fired AND velocity is rightward (not returning left)
+    if (_hapticFired && vel > 0) {
+      _skipDone = true;
+      _skipSnapCtrl
           .animateTo(1.0,
               duration: const Duration(milliseconds: 120),
               curve: Curves.easeOut)
           .then((_) => Future.delayed(
-              const Duration(milliseconds: 80), _onSkip));
+              const Duration(milliseconds: 60), _onSkip));
     } else {
-      // Snap back — even if haptic fired
+      // Snap back cleanly
       _hapticFired = false;
-      _skipCtrl.animateTo(0.0,
-          duration: const Duration(milliseconds: 300), curve: Curves.elasticOut);
-      setState(() { _dragAccum = 0; });
+      _skipSnapCtrl.animateTo(0.0,
+          duration: const Duration(milliseconds: 320), curve: Curves.elasticOut);
+      setState(() => _dragAccum = 0);
     }
   }
 
   void _onCardDragCancel() {
     _hapticFired = false;
-    _skipCtrl.animateTo(0.0,
+    _skipSnapCtrl.animateTo(0.0,
         duration: const Duration(milliseconds: 250), curve: Curves.easeOut);
-    setState(() { _dragAccum = 0; });
+    setState(() => _dragAccum = 0);
   }
 
   void _advanceQuestion() {
@@ -220,29 +248,33 @@ class _OnboardingScreenState extends State<OnboardingScreen>
 
   @override
   Widget build(BuildContext context) {
-    return FluidBackground(
-      controller: _fluidCtrl,
-      child: AnimatedBuilder(
-        animation: _introCtrl,
-        builder: (_, child) {
-          if (_introCtrl.isCompleted) return child!;
-          return ImageFiltered(
-            imageFilter: ImageFilter.blur(
-                sigmaX: _introBlur.value, sigmaY: _introBlur.value),
-            child: Opacity(opacity: _introOpacity.value, child: child),
-          );
-        },
-        child: SafeArea(
-          maintainBottomViewPadding: true,
-          child: Column(
-            children: [
-              const SizedBox(height: 20),
-              _ProgressDots(current: _currentQ, total: _totalQ),
-              const Spacer(),
-              _buildCard(),
-              const Spacer(),
-              const SizedBox(height: 32),
-            ],
+    return GestureDetector(
+      behavior: HitTestBehavior.translucent,
+      onTap: () => FocusScope.of(context).unfocus(),
+      child: FluidBackground(
+        controller: _fluidCtrl,
+        child: AnimatedBuilder(
+          animation: _introCtrl,
+          builder: (_, child) {
+            if (_introCtrl.isCompleted) return child!;
+            return ImageFiltered(
+              imageFilter: ImageFilter.blur(
+                  sigmaX: _introBlur.value, sigmaY: _introBlur.value),
+              child: Opacity(opacity: _introOpacity.value, child: child),
+            );
+          },
+          child: SafeArea(
+            maintainBottomViewPadding: true,
+            child: Column(
+              children: [
+                const SizedBox(height: 20),
+                _ProgressDots(current: _currentQ, total: _totalQ),
+                const Spacer(),
+                _buildCard(),
+                const Spacer(),
+                const SizedBox(height: 32),
+              ],
+            ),
           ),
         ),
       ),
@@ -263,9 +295,9 @@ class _OnboardingScreenState extends State<OnboardingScreen>
             ? onboardingQuestions[_currentQ] : q;
 
         Widget card = AnimatedBuilder(
-          animation: _skipCtrl,
+          animation: _skipSnapCtrl,
           builder: (_, __) {
-            final t      = _skipCtrl.value;
+            final t      = _skipSnapCtrl.value;
             // Card moves right by (skipBtnWidth + gap) at t=1
             final offset = t * (_skipBtnWidth + _skipGap);
 
@@ -276,9 +308,8 @@ class _OnboardingScreenState extends State<OnboardingScreen>
             return Stack(
               clipBehavior: Clip.none,
               children: [
-                // Skip button: starts fully off-screen left, slides into view
-                // At t=0: left = -(skipBtnWidth) → hidden
-                // At t=1: left = 0             → flush left of card (with gap)
+                // Skip button: fully hidden at t=0, slides into view as t grows
+                // left edge of button stays _skipGap away from card at t=1
                 Positioned(
                   left:   -_skipBtnWidth + (t * _skipBtnWidth),
                   top:    0,
@@ -292,7 +323,7 @@ class _OnboardingScreenState extends State<OnboardingScreen>
                   ),
                 ),
 
-                // Card slides right
+                // Card slides right, leaving gap after skip button
                 Transform.translate(
                   offset: Offset(offset, 0),
                   child: GestureDetector(
@@ -322,9 +353,10 @@ class _OnboardingScreenState extends State<OnboardingScreen>
           },
         );
 
-        // Clip: expand left boundary as skip button reveals
+        // Clip expands left so skip panel isn't cut off
         card = ClipRect(
-          clipper: _SkipRevealClipper(skipCtrl: _skipCtrl,
+          clipper: _SkipRevealClipper(
+              skipCtrl: _skipSnapCtrl,
               maxExpand: _skipBtnWidth + _skipGap),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -437,11 +469,13 @@ class _QuestionCardState extends State<_QuestionCard> {
   bool               _showWriteOwn = false;
   final _textCtrl = TextEditingController();
 
-  // Which choice is being swiped (index), and its drag offset
-  int    _swipingChoice = -1;
-  double _choiceDrag    = 0.0;
+  // Per-choice swipe state
+  int    _swipingChoice  = -1;
+  double _choiceDrag     = 0.0;
+  bool   _changeHapticFired = false;
   static const double _changeThreshold = 80.0;
   static const double _changeBtnWidth  = 72.0;
+  static const double _changeGap       = 10.0; // gap between choice card and change btn
 
   final GlobalKey _cardKey = GlobalKey();
   double _proximity = 0.0;
@@ -533,6 +567,14 @@ class _QuestionCardState extends State<_QuestionCard> {
   TextDirection get _textDir => widget.language == AppLanguage.arabic
       ? TextDirection.rtl : TextDirection.ltr;
 
+  void _resetChoiceSwipe() {
+    setState(() {
+      _swipingChoice     = -1;
+      _choiceDrag        = 0.0;
+      _changeHapticFired = false;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return CustomPaint(
@@ -569,18 +611,18 @@ class _QuestionCardState extends State<_QuestionCard> {
   Widget _buildChoice(int index, AnswerChoice choice) {
     final isSwiping = _swipingChoice == index;
     final drag      = isSwiping ? _choiceDrag : 0.0;
-    // drag is NEGATIVE (left swipe)
-    final revealT   = ((-drag) / _changeBtnWidth).clamp(0.0, 1.0);
+    // drag is NEGATIVE (left swipe), revealT 0→1
+    final revealT   = ((-drag) / (_changeBtnWidth + _changeGap)).clamp(0.0, 1.0);
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: ClipRect(
-        clipper: _ChangeRevealClipper(revealT: revealT,
-            btnWidth: _changeBtnWidth),
+        clipper: _ChangeRevealClipper(
+            revealT: revealT, btnWidth: _changeBtnWidth + _changeGap),
         child: Stack(
           clipBehavior: Clip.none,
           children: [
-            // "Change answer" button on the RIGHT — revealed by left swipe
+            // Change button on the RIGHT, slides in from right edge
             Positioned(
               right:  -_changeBtnWidth + (revealT * _changeBtnWidth),
               top:    0,
@@ -591,49 +633,62 @@ class _QuestionCardState extends State<_QuestionCard> {
                 progress:  revealT,
                 orbOffset: _localOrb,
                 proximity: _proximity,
-                onTap:     () {
-                  // Reset this choice — dismiss swipe, let user re-tap
-                  setState(() { _swipingChoice = -1; _choiceDrag = 0; });
-                },
+                onTap:     _resetChoiceSwipe,
               ),
             ),
 
-            // Choice card slides left
+            // Choice card slides left, leaving gap before change button
             Transform.translate(
               offset: Offset(drag, 0),
               child: GestureDetector(
                 onTap: () {
-                  if (_swipingChoice == index && _choiceDrag < -10) {
-                    // Dismiss swipe first
-                    setState(() { _swipingChoice = -1; _choiceDrag = 0; });
+                  if (isSwiping && _choiceDrag < -8) {
+                    _resetChoiceSwipe();
                     return;
                   }
                   widget.onAnswer(choice);
                 },
-                onHorizontalDragStart: (_) {
-                  setState(() { _swipingChoice = index; _choiceDrag = 0; });
+                onHorizontalDragStart: (d) {
+                  // Only start if moving leftward
+                  if (d.globalPosition.dx >= 0) {
+                    setState(() {
+                      _swipingChoice     = index;
+                      _choiceDrag        = 0.0;
+                      _changeHapticFired = false;
+                    });
+                  }
                 },
                 onHorizontalDragUpdate: (d) {
                   if (_swipingChoice != index) return;
-                  setState(() {
-                    _choiceDrag =
-                        (_choiceDrag + d.delta.dx).clamp(-_changeBtnWidth - 16, 0.0);
-                  });
-                },
-                onHorizontalDragEnd: (d) {
-                  final goingLeft = d.velocity.pixelsPerSecond.dx < 200;
-                  if ((-_choiceDrag) >= _changeThreshold && goingLeft) {
+                  final newDrag = (_choiceDrag + d.delta.dx)
+                      .clamp(-(_changeBtnWidth + _changeGap + 20.0), 0.0);
+                  setState(() => _choiceDrag = newDrag);
+
+                  // Fire haptic when crossing threshold going LEFT
+                  if (-newDrag >= _changeThreshold &&
+                      !_changeHapticFired &&
+                      d.delta.dx < 0) {
+                    _changeHapticFired = true;
                     HapticFeedback.lightImpact();
-                    setState(() {
-                      _choiceDrag = -_changeBtnWidth;
-                    });
-                  } else {
-                    setState(() { _swipingChoice = -1; _choiceDrag = 0; });
+                    // ── Haptic = instant change (no tap needed) ──
+                    Future.microtask(() => _resetChoiceSwipe());
+                  }
+
+                  // Reset haptic if they swipe back right
+                  if (_changeHapticFired && d.delta.dx > 8) {
+                    _changeHapticFired = false;
                   }
                 },
-                onHorizontalDragCancel: () {
-                  setState(() { _swipingChoice = -1; _choiceDrag = 0; });
+                onHorizontalDragEnd: (d) {
+                  // If haptic already fired → change already triggered, just reset
+                  if (_changeHapticFired) {
+                    _resetChoiceSwipe();
+                    return;
+                  }
+                  // Otherwise snap back
+                  _resetChoiceSwipe();
                 },
+                onHorizontalDragCancel: _resetChoiceSwipe,
                 child: LiquidGlassCard(
                   selected:     false,
                   orbOffset:    _localOrb,
@@ -759,16 +814,15 @@ class _ChangeRevealClipper extends CustomClipper<Rect> {
   }
 
   @override
-  bool shouldReclip(_ChangeRevealClipper old) =>
-      old.revealT != revealT;
+  bool shouldReclip(_ChangeRevealClipper old) => old.revealT != revealT;
 }
 
 // ─── Change answer panel ──────────────────────────────────────────────────────
 class _ChangeAnswerPanel extends StatelessWidget {
-  final String   label;
-  final double   progress;
-  final Offset   orbOffset;
-  final double   proximity;
+  final String       label;
+  final double       progress;
+  final Offset       orbOffset;
+  final double       proximity;
   final VoidCallback onTap;
 
   const _ChangeAnswerPanel({
